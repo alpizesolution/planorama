@@ -5,3 +5,5 @@
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition-duration:.01ms!important}}
 
 .save-error{margin:-2px 0 12px;color:#b00020;font-size:11px;font-weight:600}.empty-tasks{padding:14px 2px;color:#71695f;font-size:11px;line-height:1.6}
+
+.quick-add{flex-wrap:wrap}.quick-add-options{display:flex;flex:1 0 100%;gap:10px;align-items:center}.quick-add-options label{display:flex;flex:1;min-width:0;flex-direction:column;gap:5px;color:#71695f;font-size:10px;font-weight:700}.quick-add-options input,.quick-add-options select{width:100%;min-width:0;padding:8px 7px;border:2px solid var(--ink);border-radius:7px;background:#fff;font:inherit;font-size:10px;color:var(--ink)}.task-title{display:flex;flex-direction:column;gap:2px}.task-due-date{color:#777066;font-size:9px;font-weight:500;text-decoration:none}.is-done .task-due-date{text-decoration:line-through}@media(max-width:520px){.quick-add-options{gap:7px}.quick-add-options input,.quick-add-options select{font-size:9px;padding:7px 4px}}
