@@ -10,6 +10,8 @@ const monthName = (date: Date) => date.toLocaleDateString("en", { month: "long",
 export default function HomePage() {
   const [tasks, setTasks] = useState<PlannerTask[]>([]);
   const [newTask, setNewTask] = useState("");
+  const [newDueDate, setNewDueDate] = useState("");
+  const [newPriority, setNewPriority] = useState<PlannerTask["priority"]>("p4");
   const [monthOffset, setMonthOffset] = useState(0);
   const [view, setView] = useState<"month" | "year">("month");
   const [loaded, setLoaded] = useState(false);
@@ -35,9 +37,11 @@ export default function HomePage() {
     const title = newTask.trim();
     if (!title) return;
     try {
-      const task = await createTask({ title });
+      const task = await createTask({ title, dueDate: newDueDate || null, priority: newPriority });
       setTasks((current) => [...current, task]);
       setNewTask("");
+      setNewDueDate("");
+      setNewPriority("p4");
       setSaveError("");
     } catch {
       setSaveError("This task could not be saved. Please try again.");
@@ -71,9 +75,9 @@ export default function HomePage() {
           <div className="calendar-footer"><span className="legend"><i className="day-dot pink" /> Tasks due</span><span className="footer-hint">Your plans will live here ✳</span></div>
         </section>
         <section className="tasks-card neo-card" id="tasks"><div className="tasks-top"><div><span className="section-kicker">ONE THING AT A TIME</span><h2>Little wins<span className="heading-period">.</span></h2></div><span className="task-progress">{completed}/{tasks.length}</span></div><div className="progress-track"><span style={{ width: (tasks.length ? (completed / tasks.length) * 100 : 0) + "%" }} /></div><p className="tasks-subtitle">{loaded ? "Saved on this device · your progress stays here." : "Loading your saved tasks…"}</p>
-          <form className="quick-add" onSubmit={(event) => { event.preventDefault(); void addTask(); }}><input aria-label="New task" placeholder="Add something to your list…" value={newTask} onChange={(event) => setNewTask(event.target.value)} /><button aria-label="Add task" type="submit"><Plus size={20} weight="bold" /></button></form>
+          <form className="quick-add" onSubmit={(event) => { event.preventDefault(); void addTask(); }}><input aria-label="New task" placeholder="Add something to your list…" maxLength={240} value={newTask} onChange={(event) => setNewTask(event.target.value)} /><button aria-label="Add task" type="submit"><Plus size={20} weight="bold" /></button><div className="quick-add-options"><label>Due date <input aria-label="Task due date" type="date" value={newDueDate} onChange={(event) => setNewDueDate(event.target.value)} /></label><label>Priority <select aria-label="Task priority" value={newPriority} onChange={(event) => setNewPriority(event.target.value as PlannerTask["priority"])}><option value="p1">P1 · Urgent</option><option value="p2">P2 · High</option><option value="p3">P3 · Normal</option><option value="p4">P4 · Low</option></select></label></div></form>
           {saveError && <p className="save-error" role="status">{saveError}</p>}
-          <div className="task-list">{tasks.map((task) => <button className={"task-row " + (task.status === "completed" ? "is-done" : "")} key={task.id} onClick={() => void toggleTask(task)}><span className={"task-check " + (task.status === "completed" ? "checked" : "")}>{task.status === "completed" && <CheckCircle size={18} weight="fill" />}</span><span className="task-title">{task.title}</span><i className={"task-color " + (task.priority === "p1" ? "pink" : task.priority === "p2" ? "orange" : task.priority === "p3" ? "blue" : "lime")} /></button>)}</div>
+          <div className="task-list">{tasks.map((task) => <button className={"task-row " + (task.status === "completed" ? "is-done" : "")} key={task.id} onClick={() => void toggleTask(task)}><span className={"task-check " + (task.status === "completed" ? "checked" : "")}>{task.status === "completed" && <CheckCircle size={18} weight="fill" />}</span><span className="task-title">{task.title}{task.dueDate && <small className="task-due-date">{new Date(task.dueDate + "T12:00:00").toLocaleDateString("en", { month: "short", day: "numeric" })}</small>}</span><i className={"task-color " + (task.priority === "p1" ? "pink" : task.priority === "p2" ? "orange" : task.priority === "p3" ? "blue" : "lime")} /></button>)}</div>
           {loaded && tasks.length === 0 && <p className="empty-tasks">Your list is a blank page. Add a little win to get started.</p>}
           <div className="gentle-reminder"><span>✳</span><p>Small steps count. You don’t have to do it all today.</p></div>
         </section>
