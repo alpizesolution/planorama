@@ -82,9 +82,3 @@ button.day-cell.selected-day .calendar-task-count{background:var(--yellow)}
 button.day-cell.today .calendar-task-count{bottom:5px}
 @media(max-width:650px){.calendar-task-count{min-width:15px;height:15px;font-size:8px;bottom:5px}}
 
-
-/* Inline scheduling makes undated tasks easy to place on the calendar. */
-.inline-date-label{display:flex;flex:0 0 auto;align-items:center}
-.inline-date-label input{width:31px;max-width:31px;min-width:0;padding:5px 2px;border:1.5px solid var(--ink);border-radius:6px;background:#fff;font:inherit;font-size:9px;cursor:pointer}
-.inline-date-label input:focus{width:135px;max-width:135px;outline:2px solid var(--blue);outline-offset:1px}
-@media(max-width:520px){.inline-date-label input:focus{width:125px;max-width:125px}.task-row{gap:6px}}
