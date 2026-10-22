@@ -7,3 +7,20 @@
 .save-error{margin:-2px 0 12px;color:#b00020;font-size:11px;font-weight:600}.empty-tasks{padding:14px 2px;color:#71695f;font-size:11px;line-height:1.6}
 
 .quick-add{flex-wrap:wrap}.quick-add-options{display:flex;flex:1 0 100%;gap:10px;align-items:center}.quick-add-options label{display:flex;flex:1;min-width:0;flex-direction:column;gap:5px;color:#71695f;font-size:10px;font-weight:700}.quick-add-options input,.quick-add-options select{width:100%;min-width:0;padding:8px 7px;border:2px solid var(--ink);border-radius:7px;background:#fff;font:inherit;font-size:10px;color:var(--ink)}.task-title{display:flex;flex-direction:column;gap:2px}.task-due-date{color:#777066;font-size:9px;font-weight:500;text-decoration:none}.is-done .task-due-date{text-decoration:line-through}@media(max-width:520px){.quick-add-options{gap:7px}.quick-add-options input,.quick-add-options select{font-size:9px;padding:7px 4px}}
+
+
+/* Phase 3: task editing controls */
+.task-row{gap:8px}
+.task-toggle{display:grid;flex:0 0 20px;place-items:center;padding:0;border:0;background:transparent;cursor:pointer}
+.task-row-actions{display:flex;align-items:center;gap:5px}
+.task-action{padding:6px 8px;border:1.5px solid var(--ink);border-radius:6px;background:#fff;font-size:9px;font-weight:700;cursor:pointer}
+.task-action:hover{background:var(--yellow)}
+.task-action.delete{color:#b00020}
+.task-action.delete:hover{background:#ffe0e5}
+.task-edit-form{display:grid;gap:10px;padding:13px 0;border-bottom:1px solid #eee7db}
+.task-edit-form label{display:grid;gap:5px;color:#71695f;font-size:10px;font-weight:700}
+.task-edit-form input,.task-edit-form select{width:100%;min-width:0;padding:9px 8px;border:2px solid var(--ink);border-radius:7px;background:#fff;color:var(--ink);font:inherit;font-size:11px}
+.task-edit-fields{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.task-edit-actions{display:flex;gap:7px}
+.task-action.save{background:var(--lime)}
+@media(max-width:520px){.task-row{flex-wrap:wrap}.task-title{min-width:calc(100% - 80px)}.task-row-actions{margin-left:28px}.task-edit-fields{grid-template-columns:1fr 1fr}}
