@@ -54,7 +54,8 @@ export default function HomePage() {
   const completed = tasks.filter((task) => task.status === "completed").length;
   const visibleTasks = tasks.filter((task) => {
     const matchesDate = !selectedDate || task.dueDate === selectedDate;
-    const matchesStatus = taskFilter === "all" || task.status === taskFilter;\n    const matchesLabel = !labelFilter || task.labelIds.includes(labelFilter);
+    const matchesStatus = taskFilter === "all" || task.status === taskFilter;
+    const matchesLabel = !labelFilter || task.labelIds.includes(labelFilter);
     const query = taskSearch.trim().toLocaleLowerCase();
     const matchesSearch = !query || task.title.toLocaleLowerCase().includes(query) || task.notes.toLocaleLowerCase().includes(query);
     return matchesDate && matchesStatus && matchesSearch && matchesLabel;
@@ -210,7 +211,8 @@ export default function HomePage() {
     setEditNotes(task.notes);
     setEditDueDate(task.dueDate ?? "");
     setEditPriority(task.priority);
-    setEditRecurrence(task.recurrence ?? "none");\n    setEditLabelIds(task.labelIds ?? []);
+    setEditRecurrence(task.recurrence ?? "none");
+    setEditLabelIds(task.labelIds ?? []);
     setSaveError("");
   }
 
