@@ -104,7 +104,14 @@ export default function HomePage() {
   function applyTemplate(templateId: string) {
     setSelectedTemplateId(templateId);
     const template = taskTemplates.find((item) => item.id === templateId);
-    if (!template) return;
+    if (!template) {
+      setNewTask("");
+      setNewNotes("");
+      setNewPriority("p4");
+      setNewRecurrence("none");
+      setSaveError("");
+      return;
+    }
     setNewTask(template.title);
     setNewNotes(template.notes);
     setNewPriority(template.priority);
