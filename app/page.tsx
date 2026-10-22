@@ -265,9 +265,19 @@ export default function HomePage() {
       if (backup.format !== "planorama-backup" || backup.version !== 1 || !Array.isArray(backup.tasks)) {
         throw new Error("This file is not a supported Planorama backup.");
       }
+
       const importedTasks = backup.tasks.map(validateTask);
+      const taskIds = importedTasks.map((task) => task.id);
+      if (new Set(taskIds).size !== taskIds.length) throw new Error("The backup contains duplicate task IDs.");
+
       const isValidNamedItems = (value: unknown): value is { id: string; name: string }[] =>
-        Array.isArray(value) && value.every((item) => item && typeof item.id === "string" && typeof item.name === "string" && item.name.trim().length > 0);
+        Array.isArray(value) && value.every((item) =>
+          item && typeof item.id === "string" && item.id.trim().length > 0 &&
+          typeof item.name === "string" && item.name.trim().length > 0);
+      const hasUniqueNamedItems = (items: { id: string; name: string }[]) =>
+        new Set(items.map((item) => item.id)).size === items.length &&
+        new Set(items.map((item) => item.name.trim().toLocaleLowerCase())).size === items.length;
+
       const importedLabels = backup.labels === undefined ? labels : backup.labels;
       const importedProjects = backup.projects === undefined ? projects : backup.projects;
       const importedTemplates = backup.templates === undefined ? taskTemplates : backup.templates;
@@ -276,20 +286,54 @@ export default function HomePage() {
         weekStartsOn: [0, 1, 6].includes(importedPreferences.weekStartsOn as number) ? importedPreferences.weekStartsOn as PlannerPreferences["weekStartsOn"] : preferences.weekStartsOn,
         defaultSort: ["due", "priority", "newest"].includes(importedPreferences.defaultSort ?? "") ? importedPreferences.defaultSort as PlannerPreferences["defaultSort"] : preferences.defaultSort,
       };
-      if (!isValidNamedItems(importedLabels) || !isValidNamedItems(importedProjects) ||
-          !Array.isArray(importedTemplates) || !importedTemplates.every((item) =>
-            item && typeof item.id === "string" && typeof item.name === "string" &&
-            typeof item.title === "string" && typeof item.notes === "string" &&
-            ["p1", "p2", "p3", "p4"].includes(item.priority) &&
-            ["none", "daily", "weekly", "monthly"].includes(item.recurrence))) {
-        throw new Error("The backup contains invalid labels, projects, or templates.");
+
+      const validTemplates = Array.isArray(importedTemplates) && importedTemplates.every((item) =>
+        item && typeof item.id === "string" && item.id.trim().length > 0 &&
+        typeof item.name === "string" && item.name.trim().length > 0 &&
+        typeof item.title === "string" && item.title.trim().length > 0 &&
+        typeof item.notes === "string" &&
+        ["p1", "p2", "p3", "p4"].includes(item.priority) &&
+        ["none", "daily", "weekly", "monthly"].includes(item.recurrence));
+      if (!isValidNamedItems(importedLabels) || !hasUniqueNamedItems(importedLabels) ||
+          !isValidNamedItems(importedProjects) || !hasUniqueNamedItems(importedProjects) ||
+          !validTemplates || !hasUniqueNamedItems(importedTemplates)) {
+        throw new Error("The backup contains invalid or duplicate labels, projects, or templates.");
       }
+
       if (!window.confirm(`Import ${importedTasks.length} tasks? Existing tasks with matching IDs will be updated; other tasks will be kept.`)) return;
-      await Promise.all(importedTasks.map((task) => updateTask(task)));
-      window.localStorage.setItem(LABEL_STORAGE_KEY, JSON.stringify(importedLabels));
-      window.localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(importedProjects));
-      window.localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(importedTemplates));
-      window.localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(restoredPreferences));
+
+      // Snapshot current state so a failed import can restore task records and local settings.
+      const previousTasks = await getTasks();
+      const storageKeys = [LABEL_STORAGE_KEY, PROJECT_STORAGE_KEY, TEMPLATE_STORAGE_KEY, PREFERENCES_STORAGE_KEY];
+      const previousStorage = storageKeys.map((key) => [key, window.localStorage.getItem(key)] as const);
+      try {
+        for (const task of importedTasks) await updateTask(task);
+        window.localStorage.setItem(LABEL_STORAGE_KEY, JSON.stringify(importedLabels));
+        window.localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(importedProjects));
+        window.localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(importedTemplates));
+        window.localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(restoredPreferences));
+      } catch (error) {
+        // Best-effort rollback if storage or task persistence fails partway through.
+        const previousIds = new Set(previousTasks.map((task) => task.id));
+        for (const task of importedTasks) {
+          try {
+            if (previousIds.has(task.id)) {
+              const previous = previousTasks.find((item) => item.id === task.id);
+              if (previous) await updateTask(previous);
+            } else {
+              await removeTask(task.id);
+            }
+          } catch { /* Preserve the original import error; report it below. */ }
+        }
+        for (const [key, value] of previousStorage) {
+          try {
+            if (value === null) window.localStorage.removeItem(key);
+            else window.localStorage.setItem(key, value);
+          } catch { /* Best-effort restoration when browser storage is unavailable. */ }
+        }
+        throw error;
+      }
+
       setTasks(await getTasks());
       setLabels(importedLabels as TaskLabel[]);
       setProjects(importedProjects as TaskProject[]);
