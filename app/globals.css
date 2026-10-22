@@ -82,3 +82,31 @@ button.day-cell.selected-day .calendar-task-count{background:var(--yellow)}
 button.day-cell.today .calendar-task-count{bottom:5px}
 @media(max-width:650px){.calendar-task-count{min-width:15px;height:15px;font-size:8px;bottom:5px}}
 
+
+
+/* Task form layout polish: prevent compressed controls and overlapping labels. */
+.quick-add{display:grid;grid-template-columns:minmax(0,1fr) 42px;align-items:start;gap:10px;margin:0 0 16px}
+.quick-add>input{grid-column:1;grid-row:1;min-height:42px;font-size:12px}
+.quick-add>button[type="submit"]{grid-column:2;grid-row:1;width:42px;height:42px}
+.quick-add-options{grid-column:1 / -1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:2px;align-items:start}
+.quick-add-options label{display:grid;grid-template-columns:minmax(0,1fr);gap:6px;min-width:0;font-size:11px;line-height:1.35}
+.quick-add-options .notes-field{grid-column:1 / -1}
+.quick-add-options input,.quick-add-options select,.quick-add-options textarea{display:block;width:100%;min-width:0;max-width:100%;min-height:39px;padding:9px 10px;font-size:12px;line-height:1.35}
+.quick-add-options textarea{min-height:76px;resize:vertical}
+.quick-add-options select{white-space:normal}
+.quick-add-options input:focus,.quick-add-options select:focus{outline:3px solid #ffe14d;outline-offset:1px}
+.task-edit-fields{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.task-edit-fields label{min-width:0;overflow-wrap:anywhere}
+.task-edit-fields input,.task-edit-fields select{min-height:40px;font-size:12px}
+.task-edit-form{gap:12px;padding:16px 0}
+.task-edit-form label{line-height:1.35}
+.task-edit-actions{flex-wrap:wrap}
+@media(max-width:650px){
+  .quick-add{gap:8px}
+  .quick-add-options{grid-template-columns:minmax(0,1fr);gap:11px}
+  .quick-add-options .notes-field{grid-column:1}
+  .quick-add-options input,.quick-add-options select,.quick-add-options textarea{font-size:16px;min-height:42px}
+  .quick-add-options textarea{min-height:84px}
+  .task-edit-fields{grid-template-columns:minmax(0,1fr)}
+  .task-edit-form input,.task-edit-form select,.task-edit-form textarea{font-size:16px;min-height:42px}
+}
