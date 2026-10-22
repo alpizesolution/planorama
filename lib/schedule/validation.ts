@@ -2,6 +2,7 @@ import type { NewPlannerTask, PlannerTask } from "./types";
 
 const priorities = new Set(["p1", "p2", "p3", "p4"]);
 const statuses = new Set(["open", "completed"]);
+const recurrences = new Set(["none", "daily", "weekly", "monthly"]);
 
 export function validateTask(value: unknown): PlannerTask {
   if (!value || typeof value !== "object") throw new Error("Task must be an object.");
@@ -15,6 +16,8 @@ export function validateTask(value: unknown): PlannerTask {
   if (!Array.isArray(task.labelIds) || !task.labelIds.every((id) => typeof id === "string")) throw new Error("Task labels are invalid.");
   if (task.dueDate !== null && (typeof task.dueDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(task.dueDate))) throw new Error("Task due date must use YYYY-MM-DD.");
   if (task.dueTime !== null && (typeof task.dueTime !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(task.dueTime))) throw new Error("Task due time must use HH:mm.");
+  if (task.recurrence !== undefined && (typeof task.recurrence !== "string" || !recurrences.has(task.recurrence))) throw new Error("Task recurrence is invalid.");
+  if (task.recurrence === undefined) task.recurrence = "none";
   if (typeof task.createdAt !== "string" || typeof task.updatedAt !== "string") throw new Error("Task timestamps are invalid.");
   return task as unknown as PlannerTask;
 }
@@ -35,5 +38,6 @@ export function validateNewTask(value: NewPlannerTask): Omit<PlannerTask, "id" |
     labelIds: value.labelIds ?? [],
     dueDate: value.dueDate ?? null,
     dueTime: value.dueTime ?? null,
+    recurrence: value.recurrence ?? "none",
   };
 }
