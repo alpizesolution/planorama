@@ -40,3 +40,14 @@ button.day-cell.today.selected-day span{background:var(--pink);color:#fff}
 .task-filter-bar button{padding:6px 9px;border:1.5px solid var(--ink);border-radius:7px;background:#fff;font-size:9px;font-weight:700;cursor:pointer}
 .task-filter-bar button.active{background:var(--yellow);box-shadow:2px 2px 0 var(--shadow)}
 .selected-date-label{margin-left:auto;color:#71695f;font-size:9px;font-weight:700}
+
+
+/* Phase 5: clearer priority labels and overdue task states */
+.priority-badge{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;padding:4px 6px;border:1.5px solid var(--ink);border-radius:5px;font-size:8px;font-weight:800;line-height:1;white-space:nowrap}
+.priority-p1{background:#ffd2e2;color:#8d123f}
+.priority-p2{background:#ffe0c2;color:#7a3100}
+.priority-p3{background:#dbe3ff;color:#2039a8}
+.priority-p4{background:#e2f9b7;color:#285400}
+.task-due-date.overdue{color:#b00020;font-weight:800}
+.task-row:has(.task-due-date.overdue){background:#fff8f8}
+@media(max-width:520px){.priority-badge{font-size:8px;padding:4px 5px}.task-row-actions{margin-left:0}}
