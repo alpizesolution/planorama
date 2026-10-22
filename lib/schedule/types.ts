@@ -1,5 +1,6 @@
 export type Priority = "p1" | "p2" | "p3" | "p4";
 export type TaskStatus = "open" | "completed";
+export type Recurrence = "none" | "daily" | "weekly" | "monthly";
 
 export type PlannerTask = {
   id: string;
@@ -11,6 +12,7 @@ export type PlannerTask = {
   labelIds: string[];
   dueDate: string | null;
   dueTime: string | null;
+  recurrence: Recurrence;
   createdAt: string;
   updatedAt: string;
 };
