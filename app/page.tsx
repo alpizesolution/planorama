@@ -166,20 +166,23 @@ export default function HomePage() {
     }
   }
 
-  function deleteLabel(labelId: string) {
+  async function deleteLabel(labelId: string) {
     const label = labels.find((item) => item.id === labelId);
     if (!label || !window.confirm(`Delete the “${label.name}” label? Tasks will keep their other labels.`)) return;
-    const next = labels.filter((item) => item.id !== labelId);
+    const nextLabels = labels.filter((item) => item.id !== labelId);
+    const affected = tasks.filter((task) => task.labelIds.includes(labelId));
+    const updatedTasks = affected.map((task) => ({ ...task, labelIds: task.labelIds.filter((id) => id !== labelId) }));
     try {
-      window.localStorage.setItem(LABEL_STORAGE_KEY, JSON.stringify(next));
-      setLabels(next);
+      await Promise.all(updatedTasks.map((task) => updateTask(task)));
+      window.localStorage.setItem(LABEL_STORAGE_KEY, JSON.stringify(nextLabels));
+      setLabels(nextLabels);
       setSelectedLabelIds((current) => current.filter((id) => id !== labelId));
       setEditLabelIds((current) => current.filter((id) => id !== labelId));
       if (labelFilter === labelId) setLabelFilter("");
-      setTasks((current) => current.map((task) => task.labelIds.includes(labelId) ? { ...task, labelIds: task.labelIds.filter((id) => id !== labelId) } : task));
+      setTasks((current) => current.map((task) => updatedTasks.find((updated) => updated.id === task.id) ?? task));
       setSaveError("");
     } catch {
-      setSaveError("Could not delete this label.");
+      setSaveError("Could not delete this label from every task. Please try again.");
     }
   }
 
