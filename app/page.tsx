@@ -300,6 +300,28 @@ export default function HomePage() {
         throw new Error("The backup contains invalid or duplicate labels, projects, or templates.");
       }
 
+      // Since unrelated tasks are intentionally retained, do not replace local
+      // label/project definitions they may still reference. Merge by ID and
+      // reject name collisions across different IDs rather than creating orphans.
+      const mergeNamedItems = <T extends { id: string; name: string }>(current: T[], incoming: T[]): T[] => {
+        const byId = new Map(current.map((item) => [item.id, item]));
+        for (const item of incoming) byId.set(item.id, item);
+        const merged = [...byId.values()];
+        const names = new Map<string, string>();
+        for (const item of merged) {
+          const normalized = item.name.trim().toLocaleLowerCase();
+          const existingId = names.get(normalized);
+          if (existingId && existingId !== item.id) {
+            throw new Error(`Cannot import because “${item.name}” already exists with a different ID. Rename the conflicting item in one backup and try again.`);
+          }
+          names.set(normalized, item.id);
+        }
+        return merged;
+      };
+      const mergedLabels = mergeNamedItems(labels, importedLabels);
+      const mergedProjects = mergeNamedItems(projects, importedProjects);
+      const mergedTemplates = mergeNamedItems(taskTemplates, importedTemplates);
+
       if (!window.confirm(`Import ${importedTasks.length} tasks? Existing tasks with matching IDs will be updated; other tasks will be kept.`)) return;
 
       // Snapshot current state so a failed import can restore task records and local settings.
@@ -308,9 +330,9 @@ export default function HomePage() {
       const previousStorage = storageKeys.map((key) => [key, window.localStorage.getItem(key)] as const);
       try {
         for (const task of importedTasks) await updateTask(task);
-        window.localStorage.setItem(LABEL_STORAGE_KEY, JSON.stringify(importedLabels));
-        window.localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(importedProjects));
-        window.localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(importedTemplates));
+        window.localStorage.setItem(LABEL_STORAGE_KEY, JSON.stringify(mergedLabels));
+        window.localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(mergedProjects));
+        window.localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(mergedTemplates));
         window.localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(restoredPreferences));
       } catch (error) {
         // Best-effort rollback if storage or task persistence fails partway through.
@@ -335,9 +357,9 @@ export default function HomePage() {
       }
 
       setTasks(await getTasks());
-      setLabels(importedLabels as TaskLabel[]);
-      setProjects(importedProjects as TaskProject[]);
-      setTaskTemplates(importedTemplates as TaskTemplate[]);
+      setLabels(mergedLabels as TaskLabel[]);
+      setProjects(mergedProjects as TaskProject[]);
+      setTaskTemplates(mergedTemplates as TaskTemplate[]);
       setPreferences(restoredPreferences);
       setTaskSort(restoredPreferences.defaultSort);
       setSelectedLabelIds([]);
