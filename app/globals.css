@@ -119,3 +119,22 @@ button.day-cell.today .calendar-task-count{bottom:5px}
 .template-tools select:focus{outline:3px solid #ffe14d;outline-offset:1px}
 .delete-template{min-height:39px}
 @media(max-width:520px){.template-tools{align-items:stretch;flex-direction:column}.template-tools select{min-height:42px;font-size:16px}.template-tools .task-action{align-self:flex-start}}
+
+
+/* Phase 11: task labels and organization */
+.label-manager{margin:0 0 14px;padding:11px;border:1.5px solid #e8dfd1;border-radius:9px;background:#fffaf3}
+.label-manager-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px;font-size:11px}
+.label-chip-list{display:flex;flex-wrap:wrap;gap:6px}
+.label-management-chip,.task-label-chip{display:inline-flex;align-items:center;gap:5px;padding:4px 7px;border:1.5px solid var(--ink);border-radius:6px;background:#dbe3ff;font-size:9px;font-weight:700}
+.label-management-chip button{display:grid;place-items:center;padding:0;border:0;background:transparent;font-size:14px;line-height:1;cursor:pointer}
+.label-picker{display:flex;flex-wrap:wrap;gap:7px;margin:0;padding:9px;border:1.5px solid #d9cfbf;border-radius:8px;min-width:0}
+.label-picker legend{padding:0 4px;color:#71695f;font-size:10px;font-weight:700}
+.label-picker label{display:inline-flex;flex-direction:row;align-items:center;gap:5px;padding:4px 7px;border:1px solid #d9cfbf;border-radius:6px;background:#fff;font-size:10px;font-weight:600}
+.label-picker input{width:14px!important;min-height:14px!important;height:14px;accent-color:var(--blue)}
+.edit-label-picker{margin:2px 0}
+.task-label-filter{display:flex;align-items:center;gap:5px;color:#71695f;font-size:9px;font-weight:700;white-space:nowrap}
+.task-label-filter select{max-width:115px;min-width:0;padding:9px 5px;border:2px solid var(--ink);border-radius:7px;background:#fff;font:inherit;font-size:9px;color:var(--ink)}
+.task-labels{display:flex;flex-wrap:wrap;gap:4px;margin:2px 0}
+.task-label-chip{padding:3px 5px;background:#e2f9b7;font-size:8px;text-decoration:none}
+.task-row .task-title{min-width:0;overflow-wrap:anywhere}
+@media(max-width:650px){.task-label-filter{justify-content:space-between}.task-label-filter select{flex:1;max-width:none}.label-picker{gap:6px}.label-picker label{font-size:11px}.label-picker input{min-height:14px!important}}
