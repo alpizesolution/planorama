@@ -39,7 +39,7 @@ export default function HomePage() {
   const [editPriority, setEditPriority] = useState<PlannerTask["priority"]>("p4");
   const [editRecurrence, setEditRecurrence] = useState<PlannerTask["recurrence"]>("none");
   const [monthOffset, setMonthOffset] = useState(0);
-  const [view, setView] = useState<"month" | "year">("month");
+  const [view, setView] = useState<"month" | "year" | "agenda">("month");
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [taskFilter, setTaskFilter] = useState<"all" | "open" | "completed">("all");
   const [taskSearch, setTaskSearch] = useState("");
@@ -242,6 +242,7 @@ export default function HomePage() {
         labels,
         projects,
         templates: taskTemplates,
+        preferences,
       };
       const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
@@ -270,6 +271,11 @@ export default function HomePage() {
       const importedLabels = backup.labels === undefined ? labels : backup.labels;
       const importedProjects = backup.projects === undefined ? projects : backup.projects;
       const importedTemplates = backup.templates === undefined ? taskTemplates : backup.templates;
+      const importedPreferences = backup.preferences && typeof backup.preferences === "object" ? backup.preferences as Partial<PlannerPreferences> : preferences;
+      const restoredPreferences: PlannerPreferences = {
+        weekStartsOn: [0, 1, 6].includes(importedPreferences.weekStartsOn as number) ? importedPreferences.weekStartsOn as PlannerPreferences["weekStartsOn"] : preferences.weekStartsOn,
+        defaultSort: ["due", "priority", "newest"].includes(importedPreferences.defaultSort ?? "") ? importedPreferences.defaultSort as PlannerPreferences["defaultSort"] : preferences.defaultSort,
+      };
       if (!isValidNamedItems(importedLabels) || !isValidNamedItems(importedProjects) ||
           !Array.isArray(importedTemplates) || !importedTemplates.every((item) =>
             item && typeof item.id === "string" && typeof item.name === "string" &&
@@ -283,10 +289,13 @@ export default function HomePage() {
       window.localStorage.setItem(LABEL_STORAGE_KEY, JSON.stringify(importedLabels));
       window.localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(importedProjects));
       window.localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(importedTemplates));
+      window.localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(restoredPreferences));
       setTasks(await getTasks());
       setLabels(importedLabels as TaskLabel[]);
       setProjects(importedProjects as TaskProject[]);
       setTaskTemplates(importedTemplates as TaskTemplate[]);
+      setPreferences(restoredPreferences);
+      setTaskSort(restoredPreferences.defaultSort);
       setSelectedLabelIds([]);
       setEditLabelIds([]);
       setLabelFilter("");
@@ -416,8 +425,8 @@ export default function HomePage() {
     <section className="main-panel">
       <header className="topbar"><div><span className="eyebrow">YOUR PERSONAL PLANNER</span><h1>Your life, <span>in color.</span></h1></div><div className="date-chip"><span className="date-dot" /> {today.toLocaleDateString("en", { weekday: "short", month: "short", day: "numeric" })}</div></header>
       <div className="content-grid">
-        <section className="calendar-card neo-card" id="calendar"><div className="card-header"><div><span className="section-kicker">THE BIG PICTURE</span><h2>{view === "month" ? monthName(shownDate) : shownDate.getFullYear()}</h2></div><div className="calendar-actions"><div className="segmented" aria-label="Calendar view"><button className={view === "month" ? "selected" : ""} onClick={() => setView("month")}>Month</button><button className={view === "year" ? "selected" : ""} onClick={() => setView("year")}>Year</button></div><button className="icon-button" aria-label="Previous month" onClick={() => setMonthOffset((n) => n - 1)}>←</button><button className="icon-button" aria-label="Next month" onClick={() => setMonthOffset((n) => n + 1)}>→</button></div></div>
-          {view === "month" ? <div className="calendar-grid">{["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"].slice(preferences.weekStartsOn).concat(["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"].slice(0, preferences.weekStartsOn)).map((day) => <div className="weekday" key={day}>{day}</div>)}{calendarDays.map((day, index) => { const isToday = day === today.getDate() && shownDate.getMonth() === today.getMonth() && shownDate.getFullYear() === today.getFullYear(); const dateKey = day ? formatDateKey(day) : ""; const dueTasks = day ? tasks.filter((task) => task.dueDate === dateKey) : []; const taskCount = dueTasks.length; const openCount = dueTasks.filter((task) => task.status === "open").length; const isSelected = Boolean(day && selectedDate === dateKey); return <button type="button" className={"day-cell " + (!day ? "empty " : "") + (isToday ? "today " : "") + (isSelected ? "selected-day" : "") + (taskCount ? " has-tasks" : "")} key={shownDate.getMonth() + "-" + index} disabled={!day} aria-pressed={isSelected} aria-label={day ? `${dateKey}${taskCount ? `, ${taskCount} tasks due, ${openCount} still open` : ", no tasks due"}` : "Empty calendar cell"} onClick={() => { setSelectedDate((current) => current === dateKey ? null : dateKey); setNewDueDate(dateKey); }}><span>{day ?? ""}</span>{taskCount > 0 && <span className="calendar-task-count" aria-hidden="true">{taskCount}</span>}</button>; })}</div> : <div className="year-grid">{Array.from({ length: 12 }, (_, i) => { const month = new Date(shownDate.getFullYear(), i, 1); return <button key={i} className={"year-month month-color-" + (i % 4)} onClick={() => { setMonthOffset(i - today.getMonth() + (shownDate.getFullYear() - today.getFullYear()) * 12); setView("month"); }}><strong>{month.toLocaleDateString("en", { month: "short" })}</strong><span>{new Date(month.getFullYear(), i + 1, 0).getDate()} days</span></button>; })}</div>}
+        <section className="calendar-card neo-card" id="calendar"><div className="card-header"><div><span className="section-kicker">THE BIG PICTURE</span><h2>{view === "month" ? monthName(shownDate) : shownDate.getFullYear()}</h2></div><div className="calendar-actions"><div className="segmented" aria-label="Calendar view"><button className={view === "month" ? "selected" : ""} onClick={() => setView("month")}>Month</button><button className={view === "year" ? "selected" : ""} onClick={() => setView("year")}>Year</button><button className={view === "agenda" ? "selected" : ""} onClick={() => setView("agenda")}>Agenda</button></div><button className="icon-button" aria-label="Previous month" onClick={() => setMonthOffset((n) => n - 1)}>←</button><button className="icon-button" aria-label="Next month" onClick={() => setMonthOffset((n) => n + 1)}>→</button></div></div>
+          {view === "month" ? <div className="calendar-grid">{["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"].slice(preferences.weekStartsOn).concat(["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"].slice(0, preferences.weekStartsOn)).map((day) => <div className="weekday" key={day}>{day}</div>)}{calendarDays.map((day, index) => { const isToday = day === today.getDate() && shownDate.getMonth() === today.getMonth() && shownDate.getFullYear() === today.getFullYear(); const dateKey = day ? formatDateKey(day) : ""; const dueTasks = day ? tasks.filter((task) => task.dueDate === dateKey) : []; const taskCount = dueTasks.length; const openCount = dueTasks.filter((task) => task.status === "open").length; const isSelected = Boolean(day && selectedDate === dateKey); return <button type="button" className={"day-cell " + (!day ? "empty " : "") + (isToday ? "today " : "") + (isSelected ? "selected-day" : "") + (taskCount ? " has-tasks" : "")} key={shownDate.getMonth() + "-" + index} disabled={!day} aria-pressed={isSelected} aria-label={day ? `${dateKey}${taskCount ? `, ${taskCount} tasks due, ${openCount} still open` : ", no tasks due"}` : "Empty calendar cell"} onClick={() => { setSelectedDate((current) => current === dateKey ? null : dateKey); setNewDueDate(dateKey); }}><span>{day ?? ""}</span>{taskCount > 0 && <span className="calendar-task-count" aria-hidden="true">{taskCount}</span>}</button>; })}</div> : view === "year" ? <div className="year-grid">{Array.from({ length: 12 }, (_, i) => { const month = new Date(shownDate.getFullYear(), i, 1); return <button key={i} className={"year-month month-color-" + (i % 4)} onClick={() => { setMonthOffset(i - today.getMonth() + (shownDate.getFullYear() - today.getFullYear()) * 12); setView("month"); }}><strong>{month.toLocaleDateString("en", { month: "short" })}</strong><span>{new Date(month.getFullYear(), i + 1, 0).getDate()} days</span></button>; })}</div> : <div className="agenda-list">{tasks.filter((task) => task.dueDate).slice().sort((a, b) => (a.dueDate ?? "").localeCompare(b.dueDate ?? "") || (a.dueTime ?? "99:99").localeCompare(b.dueTime ?? "99:99")).map((task) => <button type="button" className={"agenda-item " + (task.status === "completed" ? "is-done" : "")} key={task.id} onClick={() => { setSelectedDate(task.dueDate); setView("month"); }}><span className="agenda-date">{new Date(task.dueDate + "T12:00:00").toLocaleDateString("en", { month: "short", day: "numeric" })}</span><span className="agenda-task-title">{task.title}<small>{task.dueTime ? new Date("2000-01-01T" + task.dueTime).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" }) : "All day"}{task.status === "completed" ? " · Completed" : ""}</small></span><span className={"priority-badge priority-" + task.priority}>{priorityLabel(task.priority)}</span></button>)}{tasks.every((task) => !task.dueDate) && <p className="empty-tasks">Add a due date to a task and it will appear here.</p>}</div>}
           <div className="calendar-footer"><span className="legend"><i className="day-dot pink" /> Tasks due</span><button type="button" className="clear-date-button" onClick={() => setSelectedDate(null)} disabled={!selectedDate}>Clear date</button><span className="footer-hint">Select a day to filter tasks ✳</span></div>
         </section>
         <section className="tasks-card neo-card" id="tasks"><div className="tasks-top"><div><span className="section-kicker">ONE THING AT A TIME</span><h2>Little wins<span className="heading-period">.</span></h2></div><span className="task-progress">{completed}/{tasks.length}</span></div><div className="progress-track"><span style={{ width: (tasks.length ? (completed / tasks.length) * 100 : 0) + "%" }} /></div><p className="tasks-subtitle">{loaded ? "Saved on this device · your progress stays here." : "Loading your saved tasks…"}</p>
