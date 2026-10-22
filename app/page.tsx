@@ -6,6 +6,13 @@ import { createTask, getTasks, removeTask, updateTask } from "@/lib/schedule/tas
 import type { PlannerTask } from "@/lib/schedule/types";
 
 type TaskTemplate = { id: string; name: string; title: string; notes: string; priority: PlannerTask["priority"]; recurrence: PlannerTask["recurrence"] };
+type TaskLabel = { id: string; name: string };
+
+const DEFAULT_LABELS: TaskLabel[] = [
+  { id: "work", name: "Work" }, { id: "personal", name: "Personal" },
+  { id: "study", name: "Study" }, { id: "errands", name: "Errands" },
+];
+const LABEL_STORAGE_KEY = "planorama-task-labels";
 
 const TEMPLATE_STORAGE_KEY = "planorama-task-templates";
 const monthName = (date: Date) => date.toLocaleDateString("en", { month: "long", year: "numeric" });
@@ -33,6 +40,10 @@ export default function HomePage() {
   const [saveError, setSaveError] = useState("");
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [labels, setLabels] = useState<TaskLabel[]>(DEFAULT_LABELS);
+  const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
+  const [editLabelIds, setEditLabelIds] = useState<string[]>([]);
+  const [labelFilter, setLabelFilter] = useState("");
   const today = new Date();
   const shownDate = new Date(today.getFullYear(), today.getMonth() + monthOffset, 1);
   const calendarDays = useMemo(() => {
@@ -44,9 +55,10 @@ export default function HomePage() {
   const visibleTasks = tasks.filter((task) => {
     const matchesDate = !selectedDate || task.dueDate === selectedDate;
     const matchesStatus = taskFilter === "all" || task.status === taskFilter;
+    const matchesLabel = !labelFilter || task.labelIds.includes(labelFilter);
     const query = taskSearch.trim().toLocaleLowerCase();
     const matchesSearch = !query || task.title.toLocaleLowerCase().includes(query) || task.notes.toLocaleLowerCase().includes(query);
-    return matchesDate && matchesStatus && matchesSearch;
+    return matchesDate && matchesStatus && matchesSearch && matchesLabel;
   }).sort((a, b) => {
     if (taskSort === "priority") {
       const priorityOrder = { p1: 1, p2: 2, p3: 3, p4: 4 };
@@ -131,12 +143,56 @@ export default function HomePage() {
     }
   }
 
+  function toggleLabel(labelId: string, editing = false) {
+    const setter = editing ? setEditLabelIds : setSelectedLabelIds;
+    setter((current) => current.includes(labelId) ? current.filter((id) => id !== labelId) : [...current, labelId]);
+  }
+
+  function addLabel() {
+    const name = window.prompt("Name your new label");
+    const trimmed = name?.trim();
+    if (!trimmed) return;
+    if (labels.some((label) => label.name.toLocaleLowerCase() === trimmed.toLocaleLowerCase())) {
+      setSaveError("A label with that name already exists.");
+      return;
+    }
+    const label: TaskLabel = { id: crypto.randomUUID(), name: trimmed.slice(0, 40) };
+    const next = [...labels, label];
+    try {
+      window.localStorage.setItem(LABEL_STORAGE_KEY, JSON.stringify(next));
+      setLabels(next);
+      setSaveError("");
+    } catch {
+      setSaveError("Could not save this label on your device.");
+    }
+  }
+
+  async function deleteLabel(labelId: string) {
+    const label = labels.find((item) => item.id === labelId);
+    if (!label || !window.confirm(`Delete the “${label.name}” label? Tasks will keep their other labels.`)) return;
+    const nextLabels = labels.filter((item) => item.id !== labelId);
+    const affected = tasks.filter((task) => task.labelIds.includes(labelId));
+    const updatedTasks = affected.map((task) => ({ ...task, labelIds: task.labelIds.filter((id) => id !== labelId) }));
+    try {
+      await Promise.all(updatedTasks.map((task) => updateTask(task)));
+      window.localStorage.setItem(LABEL_STORAGE_KEY, JSON.stringify(nextLabels));
+      setLabels(nextLabels);
+      setSelectedLabelIds((current) => current.filter((id) => id !== labelId));
+      setEditLabelIds((current) => current.filter((id) => id !== labelId));
+      if (labelFilter === labelId) setLabelFilter("");
+      setTasks((current) => current.map((task) => updatedTasks.find((updated) => updated.id === task.id) ?? task));
+      setSaveError("");
+    } catch {
+      setSaveError("Could not delete this label from every task. Please try again.");
+    }
+  }
+
   async function addTask() {
     const title = newTask.trim();
     if (!title) return;
     if (newRecurrence !== "none" && !newDueDate) { setSaveError("Choose a due date for a recurring task."); return; }
     try {
-      const task = await createTask({ title, notes: newNotes.trim(), dueDate: newDueDate || null, priority: newPriority, recurrence: newRecurrence });
+      const task = await createTask({ title, notes: newNotes.trim(), dueDate: newDueDate || null, priority: newPriority, recurrence: newRecurrence, labelIds: selectedLabelIds });
       setTasks((current) => [...current, task]);
       setNewTask("");
       setNewNotes("");
@@ -156,6 +212,7 @@ export default function HomePage() {
     setEditDueDate(task.dueDate ?? "");
     setEditPriority(task.priority);
     setEditRecurrence(task.recurrence ?? "none");
+    setEditLabelIds(task.labelIds ?? []);
     setSaveError("");
   }
 
@@ -165,7 +222,7 @@ export default function HomePage() {
       setSaveError("A task title is required.");
       return;
     }
-    const updated = { ...task, title, notes: editNotes.trim(), dueDate: editDueDate || null, priority: editPriority, recurrence: editRecurrence };
+    const updated = { ...task, title, notes: editNotes.trim(), dueDate: editDueDate || null, priority: editPriority, recurrence: editRecurrence, labelIds: editLabelIds };
     if (updated.recurrence !== "none" && !updated.dueDate) { setSaveError("Choose a due date for a recurring task."); return; }
     try {
       const saved = await updateTask(updated);
@@ -224,6 +281,10 @@ export default function HomePage() {
           <div className="calendar-footer"><span className="legend"><i className="day-dot pink" /> Tasks due</span><button type="button" className="clear-date-button" onClick={() => setSelectedDate(null)} disabled={!selectedDate}>Clear date</button><span className="footer-hint">Select a day to filter tasks ✳</span></div>
         </section>
         <section className="tasks-card neo-card" id="tasks"><div className="tasks-top"><div><span className="section-kicker">ONE THING AT A TIME</span><h2>Little wins<span className="heading-period">.</span></h2></div><span className="task-progress">{completed}/{tasks.length}</span></div><div className="progress-track"><span style={{ width: (tasks.length ? (completed / tasks.length) * 100 : 0) + "%" }} /></div><p className="tasks-subtitle">{loaded ? "Saved on this device · your progress stays here." : "Loading your saved tasks…"}</p>
+          <div className="label-manager">
+            <div className="label-manager-heading"><strong>Labels</strong><button type="button" className="task-action" onClick={addLabel}>+ Add label</button></div>
+            <div className="label-chip-list">{labels.map((label) => <span className="label-management-chip" key={label.id}>{label.name}<button type="button" aria-label={`Delete ${label.name} label`} onClick={() => deleteLabel(label.id)}>×</button></span>)}</div>
+          </div>
           <div className="template-tools">
             <label>Task templates
               <select aria-label="Use a saved task template" value={selectedTemplateId} onChange={(event) => applyTemplate(event.target.value)}>
@@ -233,9 +294,9 @@ export default function HomePage() {
             </label>
             {selectedTemplateId && <button type="button" className="task-action delete-template" onClick={() => deleteTemplate(selectedTemplateId)}>Delete template</button>}
           </div>
-          <form className="quick-add" onSubmit={(event) => { event.preventDefault(); void addTask(); }}><input aria-label="New task" placeholder="Add something to your list…" maxLength={240} value={newTask} onChange={(event) => setNewTask(event.target.value)} /><button aria-label="Add task" type="submit"><Plus size={20} weight="bold" /></button><div className="quick-add-options"><label className="notes-field">Notes (optional) <textarea aria-label="New task notes" placeholder="Add details or a reminder…" maxLength={2000} value={newNotes} onChange={(event) => setNewNotes(event.target.value)} /></label><label>Due date <input aria-label="Task due date" type="date" value={newDueDate} onChange={(event) => setNewDueDate(event.target.value)} /></label><label>Priority <select aria-label="Task priority" value={newPriority} onChange={(event) => setNewPriority(event.target.value as PlannerTask["priority"])}><option value="p1">P1 · Urgent</option><option value="p2">P2 · High</option><option value="p3">P3 · Normal</option><option value="p4">P4 · Low</option></select></label><label>Repeat <select aria-label="Task repeat" value={newRecurrence} onChange={(event) => setNewRecurrence(event.target.value as PlannerTask["recurrence"])}><option value="none">Does not repeat</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label></div></form>
+          <form className="quick-add" onSubmit={(event) => { event.preventDefault(); void addTask(); }}><input aria-label="New task" placeholder="Add something to your list…" maxLength={240} value={newTask} onChange={(event) => setNewTask(event.target.value)} /><button aria-label="Add task" type="submit"><Plus size={20} weight="bold" /></button><div className="quick-add-options"><fieldset className="label-picker"><legend>Labels (optional)</legend>{labels.map((label) => <label key={label.id}><input type="checkbox" checked={selectedLabelIds.includes(label.id)} onChange={() => toggleLabel(label.id)} />{label.name}</label>)}</fieldset><label className="notes-field">Notes (optional) <textarea aria-label="New task notes" placeholder="Add details or a reminder…" maxLength={2000} value={newNotes} onChange={(event) => setNewNotes(event.target.value)} /></label><label>Due date <input aria-label="Task due date" type="date" value={newDueDate} onChange={(event) => setNewDueDate(event.target.value)} /></label><label>Priority <select aria-label="Task priority" value={newPriority} onChange={(event) => setNewPriority(event.target.value as PlannerTask["priority"])}><option value="p1">P1 · Urgent</option><option value="p2">P2 · High</option><option value="p3">P3 · Normal</option><option value="p4">P4 · Low</option></select></label><label>Repeat <select aria-label="Task repeat" value={newRecurrence} onChange={(event) => setNewRecurrence(event.target.value as PlannerTask["recurrence"])}><option value="none">Does not repeat</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label></div></form>
           {saveError && <p className="save-error" role="status">{saveError}</p>}
-          <div className="task-tools"><label className="task-search"><span className="sr-only">Search tasks</span><input type="search" placeholder="Search your tasks…" value={taskSearch} onChange={(event) => setTaskSearch(event.target.value)} aria-label="Search tasks" /><span aria-hidden="true">⌕</span></label><label className="task-sort">Sort by<select aria-label="Sort tasks" value={taskSort} onChange={(event) => setTaskSort(event.target.value as typeof taskSort)}><option value="due">Due date</option><option value="priority">Priority</option><option value="newest">Newest</option></select></label></div><div className="task-filter-bar" aria-label="Filter tasks">{(["all", "open", "completed"] as const).map((filter) => <button type="button" key={filter} className={taskFilter === filter ? "active" : ""} onClick={() => setTaskFilter(filter)}>{filter === "all" ? "All" : filter === "open" ? "To do" : "Done"}</button>)}{selectedDate && <span className="selected-date-label">{new Date(selectedDate + "T12:00:00").toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" })}</span>}</div><div className="task-list">{visibleTasks.map((task) => editingId === task.id ? <form className="task-edit-form" key={task.id} onSubmit={(event) => { event.preventDefault(); void saveEdit(task); }}><label>Task title<input autoFocus maxLength={240} value={editTitle} onChange={(event) => setEditTitle(event.target.value)} /></label><label>Notes (optional)<textarea maxLength={2000} value={editNotes} onChange={(event) => setEditNotes(event.target.value)} placeholder="Add details or a reminder…" /></label><div className="task-edit-fields"><label>Due date<input type="date" value={editDueDate} onChange={(event) => setEditDueDate(event.target.value)} /></label><label>Priority<select value={editPriority} onChange={(event) => setEditPriority(event.target.value as PlannerTask["priority"])}><option value="p1">P1 · Urgent</option><option value="p2">P2 · High</option><option value="p3">P3 · Normal</option><option value="p4">P4 · Low</option></select></label><label>Repeat<select value={editRecurrence} onChange={(event) => setEditRecurrence(event.target.value as PlannerTask["recurrence"])}><option value="none">Does not repeat</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label></div><div className="task-edit-actions"><button type="submit" className="task-action save">Save changes</button><button type="button" className="task-action" onClick={() => setEditingId(null)}>Cancel</button></div></form> : <div className={"task-row " + (task.status === "completed" ? "is-done" : "")} key={task.id}><button className="task-toggle" aria-label={task.status === "completed" ? `Mark ${task.title} as open` : `Complete ${task.title}`} onClick={() => void toggleTask(task)}><span className={"task-check " + (task.status === "completed" ? "checked" : "")}>{task.status === "completed" && <CheckCircle size={18} weight="fill" />}</span></button><span className="task-title">{task.title}{task.notes && <small className="task-notes-preview">{task.notes}</small>}{task.dueDate && <small className={"task-due-date " + (isOverdue(task) ? "overdue" : "")}>{isOverdue(task) ? "Overdue · " : ""}{new Date(task.dueDate + "T12:00:00").toLocaleDateString("en", { month: "short", day: "numeric" })}</small>}</span><span className={"priority-badge priority-" + task.priority}>{priorityLabel(task.priority)}</span><div className="task-row-actions"><button type="button" className="task-action" aria-label={`Save ${task.title} as template`} onClick={() => saveAsTemplate(task)}>Template</button><button type="button" className="task-action" aria-label={`Edit ${task.title}`} onClick={() => beginEdit(task)}>Edit</button><button type="button" className="task-action delete" aria-label={`Delete ${task.title}`} onClick={() => void deleteTask(task)}>Delete</button></div></div>)}</div>
+          <div className="task-tools"><label className="task-label-filter">Label<select aria-label="Filter by label" value={labelFilter} onChange={(event) => setLabelFilter(event.target.value)}><option value="">All labels</option>{labels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}</select></label><label className="task-search"><span className="sr-only">Search tasks</span><input type="search" placeholder="Search your tasks…" value={taskSearch} onChange={(event) => setTaskSearch(event.target.value)} aria-label="Search tasks" /><span aria-hidden="true">⌕</span></label><label className="task-sort">Sort by<select aria-label="Sort tasks" value={taskSort} onChange={(event) => setTaskSort(event.target.value as typeof taskSort)}><option value="due">Due date</option><option value="priority">Priority</option><option value="newest">Newest</option></select></label></div><div className="task-filter-bar" aria-label="Filter tasks">{(["all", "open", "completed"] as const).map((filter) => <button type="button" key={filter} className={taskFilter === filter ? "active" : ""} onClick={() => setTaskFilter(filter)}>{filter === "all" ? "All" : filter === "open" ? "To do" : "Done"}</button>)}{selectedDate && <span className="selected-date-label">{new Date(selectedDate + "T12:00:00").toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" })}</span>}</div><div className="task-list">{visibleTasks.map((task) => editingId === task.id ? <form className="task-edit-form" key={task.id} onSubmit={(event) => { event.preventDefault(); void saveEdit(task); }}><label>Task title<input autoFocus maxLength={240} value={editTitle} onChange={(event) => setEditTitle(event.target.value)} /></label><label>Notes (optional)<textarea maxLength={2000} value={editNotes} onChange={(event) => setEditNotes(event.target.value)} placeholder="Add details or a reminder…" /></label><fieldset className="label-picker edit-label-picker"><legend>Labels</legend>{labels.map((label) => <label key={label.id}><input type="checkbox" checked={editLabelIds.includes(label.id)} onChange={() => toggleLabel(label.id, true)} />{label.name}</label>)}</fieldset><div className="task-edit-fields"><label>Due date<input type="date" value={editDueDate} onChange={(event) => setEditDueDate(event.target.value)} /></label><label>Priority<select value={editPriority} onChange={(event) => setEditPriority(event.target.value as PlannerTask["priority"])}><option value="p1">P1 · Urgent</option><option value="p2">P2 · High</option><option value="p3">P3 · Normal</option><option value="p4">P4 · Low</option></select></label><label>Repeat<select value={editRecurrence} onChange={(event) => setEditRecurrence(event.target.value as PlannerTask["recurrence"])}><option value="none">Does not repeat</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label></div><div className="task-edit-actions"><button type="submit" className="task-action save">Save changes</button><button type="button" className="task-action" onClick={() => setEditingId(null)}>Cancel</button></div></form> : <div className={"task-row " + (task.status === "completed" ? "is-done" : "")} key={task.id}><button className="task-toggle" aria-label={task.status === "completed" ? `Mark ${task.title} as open` : `Complete ${task.title}`} onClick={() => void toggleTask(task)}><span className={"task-check " + (task.status === "completed" ? "checked" : "")}>{task.status === "completed" && <CheckCircle size={18} weight="fill" />}</span></button><span className="task-title">{task.title}{task.labelIds?.length > 0 && <span className="task-labels">{task.labelIds.map((id) => <small className="task-label-chip" key={id}>{labels.find((label) => label.id === id)?.name ?? id}</small>)}</span>}{task.notes && <small className="task-notes-preview">{task.notes}</small>}{task.dueDate && <small className={"task-due-date " + (isOverdue(task) ? "overdue" : "")}>{isOverdue(task) ? "Overdue · " : ""}{new Date(task.dueDate + "T12:00:00").toLocaleDateString("en", { month: "short", day: "numeric" })}</small>}</span><span className={"priority-badge priority-" + task.priority}>{priorityLabel(task.priority)}</span><div className="task-row-actions"><button type="button" className="task-action" aria-label={`Save ${task.title} as template`} onClick={() => saveAsTemplate(task)}>Template</button><button type="button" className="task-action" aria-label={`Edit ${task.title}`} onClick={() => beginEdit(task)}>Edit</button><button type="button" className="task-action delete" aria-label={`Delete ${task.title}`} onClick={() => void deleteTask(task)}>Delete</button></div></div>)}</div>
           {loaded && tasks.length === 0 && <p className="empty-tasks">Your list is a blank page. Add a little win to get started.</p>}{loaded && tasks.length > 0 && visibleTasks.length === 0 && <p className="empty-tasks">{selectedDate ? "No tasks are due on this date." : "No tasks match this filter."}</p>}
           <div className="gentle-reminder"><span>✳</span><p>Small steps count. You don’t have to do it all today.</p></div>
         </section>
