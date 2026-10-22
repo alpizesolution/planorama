@@ -18,6 +18,9 @@ const LABEL_STORAGE_KEY = "planorama-task-labels";
 const PROJECT_STORAGE_KEY = "planorama-task-projects";
 
 const TEMPLATE_STORAGE_KEY = "planorama-task-templates";
+const PREFERENCES_STORAGE_KEY = "planorama-preferences";
+type PlannerPreferences = { weekStartsOn: 0 | 1 | 6; defaultSort: "due" | "priority" | "newest" };
+const DEFAULT_PREFERENCES: PlannerPreferences = { weekStartsOn: 0, defaultSort: "due" };
 const monthName = (date: Date) => date.toLocaleDateString("en", { month: "long", year: "numeric" });
 
 export default function HomePage() {
@@ -39,6 +42,7 @@ export default function HomePage() {
   const [taskFilter, setTaskFilter] = useState<"all" | "open" | "completed">("all");
   const [taskSearch, setTaskSearch] = useState("");
   const [taskSort, setTaskSort] = useState<"due" | "priority" | "newest">("due");
+  const [preferences, setPreferences] = useState<PlannerPreferences>(DEFAULT_PREFERENCES);
   const [loaded, setLoaded] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([]);
@@ -54,10 +58,11 @@ export default function HomePage() {
   const today = new Date();
   const shownDate = new Date(today.getFullYear(), today.getMonth() + monthOffset, 1);
   const calendarDays = useMemo(() => {
-    const offset = new Date(shownDate.getFullYear(), shownDate.getMonth(), 1).getDay();
+    const dayOfWeek = new Date(shownDate.getFullYear(), shownDate.getMonth(), 1).getDay();
+    const offset = (dayOfWeek - preferences.weekStartsOn + 7) % 7;
     const count = new Date(shownDate.getFullYear(), shownDate.getMonth() + 1, 0).getDate();
     return [...Array.from({ length: offset }, () => null), ...Array.from({ length: count }, (_, i) => i + 1)];
-  }, [shownDate.getFullYear(), shownDate.getMonth()]);
+  }, [shownDate.getFullYear(), shownDate.getMonth(), preferences.weekStartsOn]);
   const completed = tasks.filter((task) => task.status === "completed").length;
   const visibleTasks = tasks.filter((task) => {
     const matchesDate = !selectedDate || task.dueDate === selectedDate;
@@ -95,6 +100,15 @@ export default function HomePage() {
   useEffect(() => {
     let active = true;
     try {
+      const savedPreferences = window.localStorage.getItem(PREFERENCES_STORAGE_KEY);
+      if (savedPreferences) {
+        const parsed = JSON.parse(savedPreferences) as Partial<PlannerPreferences>;
+        const weekStartsOn = [0, 1, 6].includes(parsed.weekStartsOn as number) ? parsed.weekStartsOn as PlannerPreferences["weekStartsOn"] : DEFAULT_PREFERENCES.weekStartsOn;
+        const defaultSort = ["due", "priority", "newest"].includes(parsed.defaultSort ?? "") ? parsed.defaultSort as PlannerPreferences["defaultSort"] : DEFAULT_PREFERENCES.defaultSort;
+        const nextPreferences = { weekStartsOn, defaultSort };
+        setPreferences(nextPreferences);
+        setTaskSort(defaultSort);
+      }
       const savedProjects = window.localStorage.getItem(PROJECT_STORAGE_KEY);
       if (savedProjects) setProjects(JSON.parse(savedProjects));
       const savedLabels = window.localStorage.getItem(LABEL_STORAGE_KEY);
@@ -107,6 +121,16 @@ export default function HomePage() {
       .finally(() => { if (active) setLoaded(true); });
     return () => { active = false; };
   }, []);
+
+  function savePreferences(next: PlannerPreferences) {
+    try {
+      window.localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(next));
+      setPreferences(next);
+      setSaveError("");
+    } catch {
+      setSaveError("Could not save your planner preferences on this device.");
+    }
+  }
 
   function saveAsTemplate(task: PlannerTask) {
     const name = window.prompt("Name this template", task.title);
@@ -389,13 +413,20 @@ export default function HomePage() {
       <header className="topbar"><div><span className="eyebrow">YOUR PERSONAL PLANNER</span><h1>Your life, <span>in color.</span></h1></div><div className="date-chip"><span className="date-dot" /> {today.toLocaleDateString("en", { weekday: "short", month: "short", day: "numeric" })}</div></header>
       <div className="content-grid">
         <section className="calendar-card neo-card" id="calendar"><div className="card-header"><div><span className="section-kicker">THE BIG PICTURE</span><h2>{view === "month" ? monthName(shownDate) : shownDate.getFullYear()}</h2></div><div className="calendar-actions"><div className="segmented" aria-label="Calendar view"><button className={view === "month" ? "selected" : ""} onClick={() => setView("month")}>Month</button><button className={view === "year" ? "selected" : ""} onClick={() => setView("year")}>Year</button></div><button className="icon-button" aria-label="Previous month" onClick={() => setMonthOffset((n) => n - 1)}>←</button><button className="icon-button" aria-label="Next month" onClick={() => setMonthOffset((n) => n + 1)}>→</button></div></div>
-          {view === "month" ? <div className="calendar-grid">{["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"].map((day) => <div className="weekday" key={day}>{day}</div>)}{calendarDays.map((day, index) => { const isToday = day === today.getDate() && shownDate.getMonth() === today.getMonth() && shownDate.getFullYear() === today.getFullYear(); const dateKey = day ? formatDateKey(day) : ""; const dueTasks = day ? tasks.filter((task) => task.dueDate === dateKey) : []; const taskCount = dueTasks.length; const openCount = dueTasks.filter((task) => task.status === "open").length; const isSelected = Boolean(day && selectedDate === dateKey); return <button type="button" className={"day-cell " + (!day ? "empty " : "") + (isToday ? "today " : "") + (isSelected ? "selected-day" : "") + (taskCount ? " has-tasks" : "")} key={shownDate.getMonth() + "-" + index} disabled={!day} aria-pressed={isSelected} aria-label={day ? `${dateKey}${taskCount ? `, ${taskCount} tasks due, ${openCount} still open` : ", no tasks due"}` : "Empty calendar cell"} onClick={() => { setSelectedDate((current) => current === dateKey ? null : dateKey); setNewDueDate(dateKey); }}><span>{day ?? ""}</span>{taskCount > 0 && <span className="calendar-task-count" aria-hidden="true">{taskCount}</span>}</button>; })}</div> : <div className="year-grid">{Array.from({ length: 12 }, (_, i) => { const month = new Date(shownDate.getFullYear(), i, 1); return <button key={i} className={"year-month month-color-" + (i % 4)} onClick={() => { setMonthOffset(i - today.getMonth() + (shownDate.getFullYear() - today.getFullYear()) * 12); setView("month"); }}><strong>{month.toLocaleDateString("en", { month: "short" })}</strong><span>{new Date(month.getFullYear(), i + 1, 0).getDate()} days</span></button>; })}</div>}
+          {view === "month" ? <div className="calendar-grid">{["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"].slice(preferences.weekStartsOn).concat(["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"].slice(0, preferences.weekStartsOn)).map((day) => <div className="weekday" key={day}>{day}</div>)}{calendarDays.map((day, index) => { const isToday = day === today.getDate() && shownDate.getMonth() === today.getMonth() && shownDate.getFullYear() === today.getFullYear(); const dateKey = day ? formatDateKey(day) : ""; const dueTasks = day ? tasks.filter((task) => task.dueDate === dateKey) : []; const taskCount = dueTasks.length; const openCount = dueTasks.filter((task) => task.status === "open").length; const isSelected = Boolean(day && selectedDate === dateKey); return <button type="button" className={"day-cell " + (!day ? "empty " : "") + (isToday ? "today " : "") + (isSelected ? "selected-day" : "") + (taskCount ? " has-tasks" : "")} key={shownDate.getMonth() + "-" + index} disabled={!day} aria-pressed={isSelected} aria-label={day ? `${dateKey}${taskCount ? `, ${taskCount} tasks due, ${openCount} still open` : ", no tasks due"}` : "Empty calendar cell"} onClick={() => { setSelectedDate((current) => current === dateKey ? null : dateKey); setNewDueDate(dateKey); }}><span>{day ?? ""}</span>{taskCount > 0 && <span className="calendar-task-count" aria-hidden="true">{taskCount}</span>}</button>; })}</div> : <div className="year-grid">{Array.from({ length: 12 }, (_, i) => { const month = new Date(shownDate.getFullYear(), i, 1); return <button key={i} className={"year-month month-color-" + (i % 4)} onClick={() => { setMonthOffset(i - today.getMonth() + (shownDate.getFullYear() - today.getFullYear()) * 12); setView("month"); }}><strong>{month.toLocaleDateString("en", { month: "short" })}</strong><span>{new Date(month.getFullYear(), i + 1, 0).getDate()} days</span></button>; })}</div>}
           <div className="calendar-footer"><span className="legend"><i className="day-dot pink" /> Tasks due</span><button type="button" className="clear-date-button" onClick={() => setSelectedDate(null)} disabled={!selectedDate}>Clear date</button><span className="footer-hint">Select a day to filter tasks ✳</span></div>
         </section>
         <section className="tasks-card neo-card" id="tasks"><div className="tasks-top"><div><span className="section-kicker">ONE THING AT A TIME</span><h2>Little wins<span className="heading-period">.</span></h2></div><span className="task-progress">{completed}/{tasks.length}</span></div><div className="progress-track"><span style={{ width: (tasks.length ? (completed / tasks.length) * 100 : 0) + "%" }} /></div><p className="tasks-subtitle">{loaded ? "Saved on this device · your progress stays here." : "Loading your saved tasks…"}</p>
           <div className="label-manager">
             <div className="label-manager-heading"><strong>Labels</strong><button type="button" className="task-action" onClick={addLabel}>+ Add label</button></div>
             <div className="label-chip-list">{labels.map((label) => <span className="label-management-chip" key={label.id}>{label.name}<button type="button" aria-label={`Delete ${label.name} label`} onClick={() => deleteLabel(label.id)}>×</button></span>)}</div>
+          </div>
+          <div className="planner-preferences" aria-label="Planner preferences">
+            <div className="label-manager-heading"><strong>Planner preferences</strong><span>Saved on this device</span></div>
+            <div className="preference-fields">
+              <label>Week starts on<select aria-label="Week starts on" value={preferences.weekStartsOn} onChange={(event) => savePreferences({ ...preferences, weekStartsOn: Number(event.target.value) as PlannerPreferences["weekStartsOn"] })}><option value={0}>Sunday</option><option value={1}>Monday</option><option value={6}>Saturday</option></select></label>
+              <label>Default task sorting<select aria-label="Default task sorting" value={preferences.defaultSort} onChange={(event) => { const defaultSort = event.target.value as PlannerPreferences["defaultSort"]; savePreferences({ ...preferences, defaultSort }); setTaskSort(defaultSort); }}><option value="due">Due date</option><option value="priority">Priority</option><option value="newest">Newest first</option></select></label>
+            </div>
           </div>
           <div className="backup-tools" aria-label="Backup and restore">
             <div><strong>Backup your planner</strong><p>Export tasks, labels, projects, and templates to a JSON file.</p></div>
