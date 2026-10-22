@@ -72,3 +72,12 @@ button.day-cell.today.selected-day span{background:var(--pink);color:#fff}
 .task-edit-form textarea{line-height:1.5}
 .task-notes-preview{display:-webkit-box;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:2;color:#71695f;font-size:9px;font-weight:400;line-height:1.5;text-decoration:none;white-space:pre-wrap;overflow-wrap:anywhere}
 .is-done .task-notes-preview{text-decoration:none}
+
+
+/* Calendar date visibility fix: make scheduled tasks easy to spot. */
+button.day-cell.has-tasks{background:#fff8fc}
+button.day-cell.has-tasks:hover:not(:disabled){background:#ffe3ef}
+.calendar-task-count{position:absolute;bottom:7px;left:50%;transform:translateX(-50%);display:grid;place-items:center;min-width:17px;height:17px;padding:0 4px;border:1.5px solid var(--ink);border-radius:999px;background:var(--pink);color:#111;font-size:9px;font-weight:800;line-height:1}
+button.day-cell.selected-day .calendar-task-count{background:var(--yellow)}
+button.day-cell.today .calendar-task-count{bottom:5px}
+@media(max-width:650px){.calendar-task-count{min-width:15px;height:15px;font-size:8px;bottom:5px}}
