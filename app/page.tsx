@@ -78,6 +78,7 @@ export default function HomePage() {
   async function addTask() {
     const title = newTask.trim();
     if (!title) return;
+    if (newRecurrence !== "none" && !newDueDate) { setSaveError("Choose a due date for a recurring task."); return; }
     try {
       const task = await createTask({ title, notes: newNotes.trim(), dueDate: newDueDate || null, priority: newPriority, recurrence: newRecurrence });
       setTasks((current) => [...current, task]);
@@ -109,6 +110,7 @@ export default function HomePage() {
       return;
     }
     const updated = { ...task, title, notes: editNotes.trim(), dueDate: editDueDate || null, priority: editPriority, recurrence: editRecurrence };
+    if (updated.recurrence !== "none" && !updated.dueDate) { setSaveError("Choose a due date for a recurring task."); return; }
     try {
       const saved = await updateTask(updated);
       setTasks((current) => current.map((item) => item.id === task.id ? saved : item));
