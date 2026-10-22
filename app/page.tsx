@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { CalendarBlank, CheckCircle, ListChecks, Plus, Sparkle } from "@phosphor-icons/react";
 import { createTask, getTasks, removeTask, updateTask } from "@/lib/schedule/task-service";
 import type { PlannerTask } from "@/lib/schedule/types";
+import { validateTask } from "@/lib/schedule/validation";
 
 type TaskTemplate = { id: string; name: string; title: string; notes: string; priority: PlannerTask["priority"]; recurrence: PlannerTask["recurrence"] };
 type TaskLabel = { id: string; name: string };
@@ -93,7 +94,14 @@ export default function HomePage() {
 
   useEffect(() => {
     let active = true;
-    try { const savedProjects = window.localStorage.getItem(PROJECT_STORAGE_KEY); if (savedProjects) setProjects(JSON.parse(savedProjects)); } catch { if (active) setSaveError("Could not load saved projects on this device."); }
+    try {
+      const savedProjects = window.localStorage.getItem(PROJECT_STORAGE_KEY);
+      if (savedProjects) setProjects(JSON.parse(savedProjects));
+      const savedLabels = window.localStorage.getItem(LABEL_STORAGE_KEY);
+      if (savedLabels) setLabels(JSON.parse(savedLabels));
+      const savedTemplates = window.localStorage.getItem(TEMPLATE_STORAGE_KEY);
+      if (savedTemplates) setTaskTemplates(JSON.parse(savedTemplates));
+    } catch { if (active) setSaveError("Could not load saved organization data on this device."); }
     getTasks().then((saved) => { if (active) setTasks(saved); })
       .catch(() => { if (active) setSaveError("Could not load saved tasks on this device."); })
       .finally(() => { if (active) setLoaded(true); });
@@ -195,6 +203,71 @@ export default function HomePage() {
       setSaveError("");
     } catch {
       setSaveError("Could not delete this label from every task. Please try again.");
+    }
+  }
+
+  function exportBackup() {
+    try {
+      const backup = {
+        format: "planorama-backup",
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        tasks,
+        labels,
+        projects,
+        templates: taskTemplates,
+      };
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `planorama-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setSaveError("");
+    } catch {
+      setSaveError("Could not export your backup. Please try again.");
+    }
+  }
+
+  async function importBackup(file: File) {
+    try {
+      const parsed: unknown = JSON.parse(await file.text());
+      if (!parsed || typeof parsed !== "object") throw new Error("Invalid backup.");
+      const backup = parsed as Record<string, unknown>;
+      if (backup.format !== "planorama-backup" || backup.version !== 1 || !Array.isArray(backup.tasks)) {
+        throw new Error("This file is not a supported Planorama backup.");
+      }
+      const importedTasks = backup.tasks.map(validateTask);
+      const isValidNamedItems = (value: unknown): value is { id: string; name: string }[] =>
+        Array.isArray(value) && value.every((item) => item && typeof item.id === "string" && typeof item.name === "string" && item.name.trim().length > 0);
+      const importedLabels = backup.labels === undefined ? labels : backup.labels;
+      const importedProjects = backup.projects === undefined ? projects : backup.projects;
+      const importedTemplates = backup.templates === undefined ? taskTemplates : backup.templates;
+      if (!isValidNamedItems(importedLabels) || !isValidNamedItems(importedProjects) ||
+          !Array.isArray(importedTemplates) || !importedTemplates.every((item) =>
+            item && typeof item.id === "string" && typeof item.name === "string" &&
+            typeof item.title === "string" && typeof item.notes === "string" &&
+            ["p1", "p2", "p3", "p4"].includes(item.priority) &&
+            ["none", "daily", "weekly", "monthly"].includes(item.recurrence))) {
+        throw new Error("The backup contains invalid labels, projects, or templates.");
+      }
+      if (!window.confirm(`Import ${importedTasks.length} tasks? Existing tasks with matching IDs will be updated; other tasks will be kept.`)) return;
+      await Promise.all(importedTasks.map((task) => updateTask(task)));
+      window.localStorage.setItem(LABEL_STORAGE_KEY, JSON.stringify(importedLabels));
+      window.localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(importedProjects));
+      window.localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(importedTemplates));
+      setTasks(await getTasks());
+      setLabels(importedLabels as TaskLabel[]);
+      setProjects(importedProjects as TaskProject[]);
+      setTaskTemplates(importedTemplates as TaskTemplate[]);
+      setSelectedLabelIds([]);
+      setEditLabelIds([]);
+      setLabelFilter("");
+      setProjectFilter("");
+      setSaveError("");
+    } catch (error) {
+      setSaveError(error instanceof Error && error.message !== "Invalid backup." ? error.message : "Could not import this backup. Check that it is a valid Planorama JSON file.");
     }
   }
 
@@ -323,6 +396,10 @@ export default function HomePage() {
           <div className="label-manager">
             <div className="label-manager-heading"><strong>Labels</strong><button type="button" className="task-action" onClick={addLabel}>+ Add label</button></div>
             <div className="label-chip-list">{labels.map((label) => <span className="label-management-chip" key={label.id}>{label.name}<button type="button" aria-label={`Delete ${label.name} label`} onClick={() => deleteLabel(label.id)}>×</button></span>)}</div>
+          </div>
+          <div className="backup-tools" aria-label="Backup and restore">
+            <div><strong>Backup your planner</strong><p>Export tasks, labels, projects, and templates to a JSON file.</p></div>
+            <div className="backup-actions"><button type="button" className="task-action" onClick={exportBackup}>Export backup</button><label className="task-action import-backup">Import backup<input aria-label="Import Planorama backup" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importBackup(file); event.currentTarget.value = ""; }} /></label></div>
           </div>
           <div className="project-manager">
             <div className="label-manager-heading"><strong>Projects</strong><button type="button" className="task-action" onClick={addProject}>+ Add project</button></div>
