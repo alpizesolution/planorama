@@ -9,6 +9,7 @@ export function validateTask(value: unknown): PlannerTask {
   const task = value as Record<string, unknown>;
   if (typeof task.id !== "string" || !task.id.trim()) throw new Error("Task ID is required.");
   if (typeof task.title !== "string" || !task.title.trim() || task.title.length > 240) throw new Error("Task title must be between 1 and 240 characters.");
+  if (task.notes === undefined) task.notes = "";
   if (typeof task.notes !== "string" || task.notes.length > 10000) throw new Error("Task notes are invalid.");
   if (typeof task.status !== "string" || !statuses.has(task.status)) throw new Error("Task status is invalid.");
   if (typeof task.priority !== "string" || !priorities.has(task.priority)) throw new Error("Task priority is invalid.");
