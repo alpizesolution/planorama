@@ -7,12 +7,14 @@ import type { PlannerTask } from "@/lib/schedule/types";
 
 type TaskTemplate = { id: string; name: string; title: string; notes: string; priority: PlannerTask["priority"]; recurrence: PlannerTask["recurrence"] };
 type TaskLabel = { id: string; name: string };
+type TaskProject = { id: string; name: string };
 
 const DEFAULT_LABELS: TaskLabel[] = [
   { id: "work", name: "Work" }, { id: "personal", name: "Personal" },
   { id: "study", name: "Study" }, { id: "errands", name: "Errands" },
 ];
 const LABEL_STORAGE_KEY = "planorama-task-labels";
+const PROJECT_STORAGE_KEY = "planorama-task-projects";
 
 const TEMPLATE_STORAGE_KEY = "planorama-task-templates";
 const monthName = (date: Date) => date.toLocaleDateString("en", { month: "long", year: "numeric" });
@@ -44,6 +46,10 @@ export default function HomePage() {
   const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
   const [editLabelIds, setEditLabelIds] = useState<string[]>([]);
   const [labelFilter, setLabelFilter] = useState("");
+  const [projects, setProjects] = useState<TaskProject[]>([]);
+  const [newProjectId, setNewProjectId] = useState("");
+  const [editProjectId, setEditProjectId] = useState("");
+  const [projectFilter, setProjectFilter] = useState("");
   const today = new Date();
   const shownDate = new Date(today.getFullYear(), today.getMonth() + monthOffset, 1);
   const calendarDays = useMemo(() => {
@@ -55,10 +61,11 @@ export default function HomePage() {
   const visibleTasks = tasks.filter((task) => {
     const matchesDate = !selectedDate || task.dueDate === selectedDate;
     const matchesStatus = taskFilter === "all" || task.status === taskFilter;
-    const matchesLabel = !labelFilter || task.labelIds.includes(labelFilter);
+    const matchesLabel = !labelFilter || (task.labelIds ?? []).includes(labelFilter);
+    const matchesProject = !projectFilter || (projectFilter === "__unassigned" ? !task.projectId : task.projectId === projectFilter);
     const query = taskSearch.trim().toLocaleLowerCase();
     const matchesSearch = !query || task.title.toLocaleLowerCase().includes(query) || task.notes.toLocaleLowerCase().includes(query);
-    return matchesDate && matchesStatus && matchesSearch && matchesLabel;
+    return matchesDate && matchesStatus && matchesSearch && matchesLabel && matchesProject;
   }).sort((a, b) => {
     if (taskSort === "priority") {
       const priorityOrder = { p1: 1, p2: 2, p3: 3, p4: 4 };
@@ -86,6 +93,7 @@ export default function HomePage() {
 
   useEffect(() => {
     let active = true;
+    try { const savedProjects = window.localStorage.getItem(PROJECT_STORAGE_KEY); if (savedProjects) setProjects(JSON.parse(savedProjects)); } catch { if (active) setSaveError("Could not load saved projects on this device."); }
     getTasks().then((saved) => { if (active) setTasks(saved); })
       .catch(() => { if (active) setSaveError("Could not load saved tasks on this device."); })
       .finally(() => { if (active) setLoaded(true); });
@@ -121,6 +129,9 @@ export default function HomePage() {
       setNewNotes("");
       setNewPriority("p4");
       setNewRecurrence("none");
+      setNewProjectId("");
+      setSelectedLabelIds([]);
+      setSelectedTemplateId("");
       setSaveError("");
       return;
     }
@@ -187,12 +198,39 @@ export default function HomePage() {
     }
   }
 
+  function addProject() {
+    const name = window.prompt("Name your project");
+    const trimmed = name?.trim();
+    if (!trimmed) return;
+    if (projects.some((project) => project.name.toLocaleLowerCase() === trimmed.toLocaleLowerCase())) { setSaveError("A project with that name already exists."); return; }
+    const next = [...projects, { id: crypto.randomUUID(), name: trimmed.slice(0, 60) }];
+    try { window.localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(next)); setProjects(next); setSaveError(""); }
+    catch { setSaveError("Could not save this project on your device."); }
+  }
+
+  async function deleteProject(projectId: string) {
+    const project = projects.find((item) => item.id === projectId);
+    if (!project || !window.confirm(`Delete the “${project.name}” project? Its tasks will remain, but become unassigned.`)) return;
+    const updatedTasks = tasks.filter((task) => task.projectId === projectId).map((task) => ({ ...task, projectId: null }));
+    const nextProjects = projects.filter((item) => item.id !== projectId);
+    try {
+      await Promise.all(updatedTasks.map((task) => updateTask(task)));
+      window.localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(nextProjects));
+      setProjects(nextProjects);
+      setTasks((current) => current.map((task) => updatedTasks.find((updated) => updated.id === task.id) ?? task));
+      if (newProjectId === projectId) setNewProjectId("");
+      if (editProjectId === projectId) setEditProjectId("");
+      if (projectFilter === projectId) setProjectFilter("");
+      setSaveError("");
+    } catch { setSaveError("Could not remove this project from every task. Please try again."); }
+  }
+
   async function addTask() {
     const title = newTask.trim();
     if (!title) return;
     if (newRecurrence !== "none" && !newDueDate) { setSaveError("Choose a due date for a recurring task."); return; }
     try {
-      const task = await createTask({ title, notes: newNotes.trim(), dueDate: newDueDate || null, priority: newPriority, recurrence: newRecurrence, labelIds: selectedLabelIds });
+      const task = await createTask({ title, notes: newNotes.trim(), dueDate: newDueDate || null, priority: newPriority, recurrence: newRecurrence, labelIds: selectedLabelIds, projectId: newProjectId || null });
       setTasks((current) => [...current, task]);
       setNewTask("");
       setNewNotes("");
@@ -213,6 +251,7 @@ export default function HomePage() {
     setEditPriority(task.priority);
     setEditRecurrence(task.recurrence ?? "none");
     setEditLabelIds(task.labelIds ?? []);
+    setEditProjectId(task.projectId ?? "");
     setSaveError("");
   }
 
@@ -222,7 +261,7 @@ export default function HomePage() {
       setSaveError("A task title is required.");
       return;
     }
-    const updated = { ...task, title, notes: editNotes.trim(), dueDate: editDueDate || null, priority: editPriority, recurrence: editRecurrence, labelIds: editLabelIds };
+    const updated = { ...task, title, notes: editNotes.trim(), dueDate: editDueDate || null, priority: editPriority, recurrence: editRecurrence, labelIds: editLabelIds, projectId: editProjectId || null };
     if (updated.recurrence !== "none" && !updated.dueDate) { setSaveError("Choose a due date for a recurring task."); return; }
     try {
       const saved = await updateTask(updated);
@@ -243,7 +282,7 @@ export default function HomePage() {
         const nextDueDate = nextOccurrenceDate(updated.dueDate, updated.recurrence);
         const alreadyExists = tasks.some((item) => item.id !== updated.id && item.title === updated.title && item.dueDate === nextDueDate && item.recurrence === updated.recurrence);
         if (!alreadyExists) {
-          const nextTask = await createTask({ title: updated.title, notes: updated.notes, priority: updated.priority, dueDate: nextDueDate, recurrence: updated.recurrence });
+          const nextTask = await createTask({ title: updated.title, notes: updated.notes, priority: updated.priority, dueDate: nextDueDate, recurrence: updated.recurrence, projectId: updated.projectId, labelIds: updated.labelIds });
           setTasks((current) => [...current, nextTask]);
         }
       }
@@ -285,6 +324,10 @@ export default function HomePage() {
             <div className="label-manager-heading"><strong>Labels</strong><button type="button" className="task-action" onClick={addLabel}>+ Add label</button></div>
             <div className="label-chip-list">{labels.map((label) => <span className="label-management-chip" key={label.id}>{label.name}<button type="button" aria-label={`Delete ${label.name} label`} onClick={() => deleteLabel(label.id)}>×</button></span>)}</div>
           </div>
+          <div className="project-manager">
+            <div className="label-manager-heading"><strong>Projects</strong><button type="button" className="task-action" onClick={addProject}>+ Add project</button></div>
+            {projects.length > 0 ? <div className="project-chip-list">{projects.map((project) => <span className="project-chip" key={project.id}>{project.name}<button type="button" aria-label={`Delete ${project.name} project`} onClick={() => void deleteProject(project.id)}>×</button></span>)}</div> : <p className="project-empty">Group related tasks into a project, like Website or Study Plan.</p>}
+          </div>
           <div className="template-tools">
             <label>Task templates
               <select aria-label="Use a saved task template" value={selectedTemplateId} onChange={(event) => applyTemplate(event.target.value)}>
@@ -294,9 +337,9 @@ export default function HomePage() {
             </label>
             {selectedTemplateId && <button type="button" className="task-action delete-template" onClick={() => deleteTemplate(selectedTemplateId)}>Delete template</button>}
           </div>
-          <form className="quick-add" onSubmit={(event) => { event.preventDefault(); void addTask(); }}><input aria-label="New task" placeholder="Add something to your list…" maxLength={240} value={newTask} onChange={(event) => setNewTask(event.target.value)} /><button aria-label="Add task" type="submit"><Plus size={20} weight="bold" /></button><div className="quick-add-options"><fieldset className="label-picker"><legend>Labels (optional)</legend>{labels.map((label) => <label key={label.id}><input type="checkbox" checked={selectedLabelIds.includes(label.id)} onChange={() => toggleLabel(label.id)} />{label.name}</label>)}</fieldset><label className="notes-field">Notes (optional) <textarea aria-label="New task notes" placeholder="Add details or a reminder…" maxLength={2000} value={newNotes} onChange={(event) => setNewNotes(event.target.value)} /></label><label>Due date <input aria-label="Task due date" type="date" value={newDueDate} onChange={(event) => setNewDueDate(event.target.value)} /></label><label>Priority <select aria-label="Task priority" value={newPriority} onChange={(event) => setNewPriority(event.target.value as PlannerTask["priority"])}><option value="p1">P1 · Urgent</option><option value="p2">P2 · High</option><option value="p3">P3 · Normal</option><option value="p4">P4 · Low</option></select></label><label>Repeat <select aria-label="Task repeat" value={newRecurrence} onChange={(event) => setNewRecurrence(event.target.value as PlannerTask["recurrence"])}><option value="none">Does not repeat</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label></div></form>
+          <form className="quick-add" onSubmit={(event) => { event.preventDefault(); void addTask(); }}><input aria-label="New task" placeholder="Add something to your list…" maxLength={240} value={newTask} onChange={(event) => setNewTask(event.target.value)} /><button aria-label="Add task" type="submit"><Plus size={20} weight="bold" /></button><div className="quick-add-options"><fieldset className="label-picker"><legend>Labels (optional)</legend>{labels.map((label) => <label key={label.id}><input type="checkbox" checked={selectedLabelIds.includes(label.id)} onChange={() => toggleLabel(label.id)} />{label.name}</label>)}</fieldset><label>Project (optional)<select aria-label="Assign task to project" value={newProjectId} onChange={(event) => setNewProjectId(event.target.value)}><option value="">No project</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><label className="notes-field">Notes (optional) <textarea aria-label="New task notes" placeholder="Add details or a reminder…" maxLength={2000} value={newNotes} onChange={(event) => setNewNotes(event.target.value)} /></label><label>Due date <input aria-label="Task due date" type="date" value={newDueDate} onChange={(event) => setNewDueDate(event.target.value)} /></label><label>Priority <select aria-label="Task priority" value={newPriority} onChange={(event) => setNewPriority(event.target.value as PlannerTask["priority"])}><option value="p1">P1 · Urgent</option><option value="p2">P2 · High</option><option value="p3">P3 · Normal</option><option value="p4">P4 · Low</option></select></label><label>Repeat <select aria-label="Task repeat" value={newRecurrence} onChange={(event) => setNewRecurrence(event.target.value as PlannerTask["recurrence"])}><option value="none">Does not repeat</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label></div></form>
           {saveError && <p className="save-error" role="status">{saveError}</p>}
-          <div className="task-tools"><label className="task-label-filter">Label<select aria-label="Filter by label" value={labelFilter} onChange={(event) => setLabelFilter(event.target.value)}><option value="">All labels</option>{labels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}</select></label><label className="task-search"><span className="sr-only">Search tasks</span><input type="search" placeholder="Search your tasks…" value={taskSearch} onChange={(event) => setTaskSearch(event.target.value)} aria-label="Search tasks" /><span aria-hidden="true">⌕</span></label><label className="task-sort">Sort by<select aria-label="Sort tasks" value={taskSort} onChange={(event) => setTaskSort(event.target.value as typeof taskSort)}><option value="due">Due date</option><option value="priority">Priority</option><option value="newest">Newest</option></select></label></div><div className="task-filter-bar" aria-label="Filter tasks">{(["all", "open", "completed"] as const).map((filter) => <button type="button" key={filter} className={taskFilter === filter ? "active" : ""} onClick={() => setTaskFilter(filter)}>{filter === "all" ? "All" : filter === "open" ? "To do" : "Done"}</button>)}{selectedDate && <span className="selected-date-label">{new Date(selectedDate + "T12:00:00").toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" })}</span>}</div><div className="task-list">{visibleTasks.map((task) => editingId === task.id ? <form className="task-edit-form" key={task.id} onSubmit={(event) => { event.preventDefault(); void saveEdit(task); }}><label>Task title<input autoFocus maxLength={240} value={editTitle} onChange={(event) => setEditTitle(event.target.value)} /></label><label>Notes (optional)<textarea maxLength={2000} value={editNotes} onChange={(event) => setEditNotes(event.target.value)} placeholder="Add details or a reminder…" /></label><fieldset className="label-picker edit-label-picker"><legend>Labels</legend>{labels.map((label) => <label key={label.id}><input type="checkbox" checked={editLabelIds.includes(label.id)} onChange={() => toggleLabel(label.id, true)} />{label.name}</label>)}</fieldset><div className="task-edit-fields"><label>Due date<input type="date" value={editDueDate} onChange={(event) => setEditDueDate(event.target.value)} /></label><label>Priority<select value={editPriority} onChange={(event) => setEditPriority(event.target.value as PlannerTask["priority"])}><option value="p1">P1 · Urgent</option><option value="p2">P2 · High</option><option value="p3">P3 · Normal</option><option value="p4">P4 · Low</option></select></label><label>Repeat<select value={editRecurrence} onChange={(event) => setEditRecurrence(event.target.value as PlannerTask["recurrence"])}><option value="none">Does not repeat</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label></div><div className="task-edit-actions"><button type="submit" className="task-action save">Save changes</button><button type="button" className="task-action" onClick={() => setEditingId(null)}>Cancel</button></div></form> : <div className={"task-row " + (task.status === "completed" ? "is-done" : "")} key={task.id}><button className="task-toggle" aria-label={task.status === "completed" ? `Mark ${task.title} as open` : `Complete ${task.title}`} onClick={() => void toggleTask(task)}><span className={"task-check " + (task.status === "completed" ? "checked" : "")}>{task.status === "completed" && <CheckCircle size={18} weight="fill" />}</span></button><span className="task-title">{task.title}{task.labelIds?.length > 0 && <span className="task-labels">{task.labelIds.map((id) => <small className="task-label-chip" key={id}>{labels.find((label) => label.id === id)?.name ?? id}</small>)}</span>}{task.notes && <small className="task-notes-preview">{task.notes}</small>}{task.dueDate && <small className={"task-due-date " + (isOverdue(task) ? "overdue" : "")}>{isOverdue(task) ? "Overdue · " : ""}{new Date(task.dueDate + "T12:00:00").toLocaleDateString("en", { month: "short", day: "numeric" })}</small>}</span><span className={"priority-badge priority-" + task.priority}>{priorityLabel(task.priority)}</span><div className="task-row-actions"><button type="button" className="task-action" aria-label={`Save ${task.title} as template`} onClick={() => saveAsTemplate(task)}>Template</button><button type="button" className="task-action" aria-label={`Edit ${task.title}`} onClick={() => beginEdit(task)}>Edit</button><button type="button" className="task-action delete" aria-label={`Delete ${task.title}`} onClick={() => void deleteTask(task)}>Delete</button></div></div>)}</div>
+          <div className="task-tools"><label className="task-label-filter">Label<select aria-label="Filter by label" value={labelFilter} onChange={(event) => setLabelFilter(event.target.value)}><option value="">All labels</option>{labels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}</select></label><label className="task-project-filter">Project<select aria-label="Filter by project" value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}><option value="">All projects</option><option value="__unassigned">No project</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><label className="task-search"><span className="sr-only">Search tasks</span><input type="search" placeholder="Search your tasks…" value={taskSearch} onChange={(event) => setTaskSearch(event.target.value)} aria-label="Search tasks" /><span aria-hidden="true">⌕</span></label><label className="task-sort">Sort by<select aria-label="Sort tasks" value={taskSort} onChange={(event) => setTaskSort(event.target.value as typeof taskSort)}><option value="due">Due date</option><option value="priority">Priority</option><option value="newest">Newest</option></select></label></div><div className="task-filter-bar" aria-label="Filter tasks">{(["all", "open", "completed"] as const).map((filter) => <button type="button" key={filter} className={taskFilter === filter ? "active" : ""} onClick={() => setTaskFilter(filter)}>{filter === "all" ? "All" : filter === "open" ? "To do" : "Done"}</button>)}{selectedDate && <span className="selected-date-label">{new Date(selectedDate + "T12:00:00").toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" })}</span>}</div><div className="task-list">{visibleTasks.map((task) => editingId === task.id ? <form className="task-edit-form" key={task.id} onSubmit={(event) => { event.preventDefault(); void saveEdit(task); }}><label>Task title<input autoFocus maxLength={240} value={editTitle} onChange={(event) => setEditTitle(event.target.value)} /></label><label>Notes (optional)<textarea maxLength={2000} value={editNotes} onChange={(event) => setEditNotes(event.target.value)} placeholder="Add details or a reminder…" /></label><fieldset className="label-picker edit-label-picker"><legend>Labels</legend>{labels.map((label) => <label key={label.id}><input type="checkbox" checked={editLabelIds.includes(label.id)} onChange={() => toggleLabel(label.id, true)} />{label.name}</label>)}</fieldset><label className="task-project-edit">Project<select aria-label="Edit task project" value={editProjectId} onChange={(event) => setEditProjectId(event.target.value)}><option value="">No project</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><div className="task-edit-fields"><label>Due date<input type="date" value={editDueDate} onChange={(event) => setEditDueDate(event.target.value)} /></label><label>Priority<select value={editPriority} onChange={(event) => setEditPriority(event.target.value as PlannerTask["priority"])}><option value="p1">P1 · Urgent</option><option value="p2">P2 · High</option><option value="p3">P3 · Normal</option><option value="p4">P4 · Low</option></select></label><label>Repeat<select value={editRecurrence} onChange={(event) => setEditRecurrence(event.target.value as PlannerTask["recurrence"])}><option value="none">Does not repeat</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label></div><div className="task-edit-actions"><button type="submit" className="task-action save">Save changes</button><button type="button" className="task-action" onClick={() => setEditingId(null)}>Cancel</button></div></form> : <div className={"task-row " + (task.status === "completed" ? "is-done" : "")} key={task.id}><button className="task-toggle" aria-label={task.status === "completed" ? `Mark ${task.title} as open` : `Complete ${task.title}`} onClick={() => void toggleTask(task)}><span className={"task-check " + (task.status === "completed" ? "checked" : "")}>{task.status === "completed" && <CheckCircle size={18} weight="fill" />}</span></button><span className="task-title">{task.title}{task.projectId && <span className="task-project-chip">{projects.find((project) => project.id === task.projectId)?.name ?? "Project"}</span>}{task.labelIds?.length > 0 && <span className="task-labels">{task.labelIds.map((id) => <small className="task-label-chip" key={id}>{labels.find((label) => label.id === id)?.name ?? id}</small>)}</span>}{task.notes && <small className="task-notes-preview">{task.notes}</small>}{task.dueDate && <small className={"task-due-date " + (isOverdue(task) ? "overdue" : "")}>{isOverdue(task) ? "Overdue · " : ""}{new Date(task.dueDate + "T12:00:00").toLocaleDateString("en", { month: "short", day: "numeric" })}</small>}</span><span className={"priority-badge priority-" + task.priority}>{priorityLabel(task.priority)}</span><div className="task-row-actions"><button type="button" className="task-action" aria-label={`Save ${task.title} as template`} onClick={() => saveAsTemplate(task)}>Template</button><button type="button" className="task-action" aria-label={`Edit ${task.title}`} onClick={() => beginEdit(task)}>Edit</button><button type="button" className="task-action delete" aria-label={`Delete ${task.title}`} onClick={() => void deleteTask(task)}>Delete</button></div></div>)}</div>
           {loaded && tasks.length === 0 && <p className="empty-tasks">Your list is a blank page. Add a little win to get started.</p>}{loaded && tasks.length > 0 && visibleTasks.length === 0 && <p className="empty-tasks">{selectedDate ? "No tasks are due on this date." : "No tasks match this filter."}</p>}
           <div className="gentle-reminder"><span>✳</span><p>Small steps count. You don’t have to do it all today.</p></div>
         </section>
