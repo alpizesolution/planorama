@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useEffect, useState, useMemo } from "react";
 import type { User } from "firebase/auth";
 import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
-import { auth, googleProvider, isFirebaseConfigured } from "./config";
+import { getFirebaseAuth, getGoogleProvider, isFirebaseConfigured } from "./config";
 
 interface AuthContextType {
   user: User | null;
@@ -32,13 +32,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const configured = useMemo(() => isFirebaseConfigured(), []);
 
   useEffect(() => {
-    if (!auth) {
+    const authInstance = getFirebaseAuth();
+    if (!authInstance) {
       setLoading(false);
       return;
     }
 
     const unsubscribe = onAuthStateChanged(
-      auth,
+      authInstance,
       (currentUser) => {
         setUser(currentUser);
         setLoading(false);
@@ -55,7 +56,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithGoogle = async (): Promise<User | null> => {
     setError(null);
-    if (!auth || !googleProvider) {
+    const authInstance = getFirebaseAuth();
+    const providerInstance = getGoogleProvider();
+
+    if (!authInstance || !providerInstance) {
       const msg = "Firebase is not yet configured. Please set your NEXT_PUBLIC_FIREBASE_API_KEY environment variables.";
       setError(msg);
       throw new Error(msg);
@@ -63,7 +67,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     try {
       setLoading(true);
-      const result = await signInWithPopup(auth, googleProvider);
+      const result = await signInWithPopup(authInstance, providerInstance);
       setUser(result.user);
       return result.user;
     } catch (err: unknown) {
@@ -84,14 +88,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOutUser = async (): Promise<void> => {
     setError(null);
-    if (!auth) {
+    const authInstance = getFirebaseAuth();
+    if (!authInstance) {
       setUser(null);
       return;
     }
 
     try {
       setLoading(true);
-      await signOut(auth);
+      await signOut(authInstance);
       setUser(null);
     } catch (err: unknown) {
       const errorObj = err as { message?: string };
