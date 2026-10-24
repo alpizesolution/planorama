@@ -1142,6 +1142,7 @@ interface AddTaskModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialDueDate?: string | null;
+  initialDueTime?: string | null;
   initialStatus?: PlannerTask["status"];
   preferences: PlannerPreferences;
   labels: TaskLabel[];
@@ -1149,6 +1150,7 @@ interface AddTaskModalProps {
   onSaveTask: (taskData: {
     title: string;
     dueDate: string | null;
+    dueTime: string | null;
     status: PlannerTask["status"];
     priority: PlannerTask["priority"];
     isPinned: boolean;
@@ -1163,6 +1165,7 @@ function AddTaskModal({
   isOpen,
   onClose,
   initialDueDate,
+  initialDueTime,
   initialStatus,
   preferences,
   labels,
@@ -1171,6 +1174,7 @@ function AddTaskModal({
 }: AddTaskModalProps) {
   const [title, setTitle] = useState("");
   const [dueDate, setDueDate] = useState("");
+  const [dueTime, setDueTime] = useState("");
   const [status, setStatus] = useState<PlannerTask["status"]>("open");
   const [priority, setPriority] = useState<PlannerTask["priority"]>("none");
   const [isPinned, setIsPinned] = useState(false);
@@ -1194,6 +1198,7 @@ function AddTaskModal({
     if (isOpen) {
       setTitle("");
       setDueDate(initialDueDate ?? "");
+      setDueTime(initialDueTime ?? "");
       setStatus(initialStatus ?? "open");
       setPriority(preferences.defaultPriority ?? "none");
       setIsPinned(false);
@@ -1223,7 +1228,7 @@ function AddTaskModal({
         clearTimeout(timer);
       };
     }
-  }, [isOpen, initialDueDate, initialStatus, preferences.defaultPriority]);
+  }, [isOpen, initialDueDate, initialDueTime, initialStatus, preferences.defaultPriority]);
 
   // Close emoji picker on click outside
   useEffect(() => {
@@ -1269,6 +1274,7 @@ function AddTaskModal({
       const success = await onSaveTask({
         title: cleanTitle,
         dueDate: dueDate ? dueDate : null,
+        dueTime: dueTime ? dueTime : null,
         status,
         priority,
         isPinned,
@@ -1365,7 +1371,7 @@ function AddTaskModal({
             </div>
           </div>
 
-          {/* 4 & 5. Due date + Status */}
+          {/* 4 & 5. Due date & Due time */}
           <div className="add-task-row-two-col">
             <label className="add-task-field-label">
               <span className="add-task-field-title">Due date</span>
@@ -1377,6 +1383,82 @@ function AddTaskModal({
                 disabled={isSaving}
               />
             </label>
+            <label className="add-task-field-label">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span className="add-task-field-title">Time (optional)</span>
+                {dueTime && (
+                  <button
+                    type="button"
+                    onClick={() => setDueTime("")}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "#e11d48",
+                      fontSize: "11px",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      padding: 0,
+                    }}
+                    title="Clear time (make all-day)"
+                  >
+                    Clear time
+                  </button>
+                )}
+              </div>
+              <input
+                type="time"
+                className="add-task-native-input"
+                value={dueTime}
+                onChange={(e) => {
+                  setDueTime(e.target.value);
+                  if (e.target.value && !dueDate) {
+                    const now = new Date();
+                    setDueDate(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`);
+                  }
+                }}
+                disabled={isSaving}
+              />
+            </label>
+          </div>
+
+          {/* Quick Time Presets */}
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap", marginTop: "-4px", marginBottom: "6px" }}>
+            <span style={{ fontSize: "11px", color: "#78716c", fontWeight: 600 }}>Quick time:</span>
+            {[
+              { label: "Morning (9 AM)", val: "09:00" },
+              { label: "Noon (12 PM)", val: "12:00" },
+              { label: "Afternoon (3 PM)", val: "15:00" },
+              { label: "Evening (6 PM)", val: "18:00" },
+            ].map((preset) => (
+              <button
+                key={preset.val}
+                type="button"
+                onClick={() => {
+                  setDueTime(preset.val);
+                  if (!dueDate) {
+                    const now = new Date();
+                    setDueDate(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`);
+                  }
+                }}
+                style={{
+                  background: dueTime === preset.val ? "#ffd84d" : "#f5efe6",
+                  border: "1.5px solid #1c1917",
+                  borderRadius: "6px",
+                  padding: "2px 7px",
+                  fontSize: "10.5px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  color: "#1c1917",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Status */}
+          <div style={{ marginBottom: "6px" }}>
             <label className="add-task-field-label">
               <span className="add-task-field-title">Status</span>
               <select
@@ -1628,10 +1710,12 @@ export default function HomePage() {
   // Unified Add Task modal state
   const [addTaskOpen, setAddTaskOpen] = useState(false);
   const [addTaskDueDate, setAddTaskDueDate] = useState<string | null>(null);
+  const [addTaskDueTime, setAddTaskDueTime] = useState<string | null>(null);
   const [addTaskStatus, setAddTaskStatus] = useState<PlannerTask["status"]>("open");
 
-  const openAddTask = useCallback((options?: { date?: string | null; status?: PlannerTask["status"] }) => {
+  const openAddTask = useCallback((options?: { date?: string | null; time?: string | null; status?: PlannerTask["status"] }) => {
     setAddTaskDueDate(options?.date !== undefined ? options.date : (selectedDate || toDateKey(new Date())));
+    setAddTaskDueTime(options?.time ?? null);
     setAddTaskStatus(options?.status ?? "open");
     setAddTaskOpen(true);
   }, [selectedDate]);
@@ -2199,6 +2283,7 @@ export default function HomePage() {
   const handleSaveNewTask = async (taskData: {
     title: string;
     dueDate: string | null;
+    dueTime: string | null;
     status: PlannerTask["status"];
     priority: PlannerTask["priority"];
     isPinned: boolean;
@@ -2210,6 +2295,7 @@ export default function HomePage() {
     const task = await createTask({
       title: taskData.title,
       dueDate: taskData.dueDate,
+      dueTime: taskData.dueTime,
       status: taskData.status,
       priority: taskData.priority,
       isPinned: taskData.isPinned,
@@ -4365,6 +4451,7 @@ export default function HomePage() {
         isOpen={addTaskOpen}
         onClose={closeAddTask}
         initialDueDate={addTaskDueDate}
+        initialDueTime={addTaskDueTime}
         initialStatus={addTaskStatus}
         preferences={preferences}
         labels={labels}
