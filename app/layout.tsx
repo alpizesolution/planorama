@@ -28,6 +28,8 @@ const swCleanupScript = `
 })();
 `;
 
+import { Providers } from "./providers";
+
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
@@ -35,7 +37,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         {/* Evict stale Vite/workbox service workers before hydration */}
         <script dangerouslySetInnerHTML={{ __html: swCleanupScript }} />
       </head>
-      <body>{children}</body>
+      <body>
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }

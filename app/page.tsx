@@ -47,6 +47,7 @@ import {
   resolveDashboardWidgets,
 } from "@/lib/dashboard/types";
 import { GoogleCalendarSettings } from "@/app/components/google-calendar-settings";
+import { UserProfileButton } from "@/app/components/auth/user-profile-button";
 import { executeTwoWaySync } from "@/lib/google-calendar/sync-service";
 import type { GoogleCalendarSyncSettings } from "@/lib/google-calendar/types";
 import { DEFAULT_GOOGLE_SYNC_SETTINGS } from "@/lib/google-calendar/types";
@@ -3540,6 +3541,10 @@ export default function HomePage() {
         </div>
 
         <div className="topbar-actions">
+          <UserProfileButton
+            onOpenPreferences={() => setPreferencesModalOpen(true)}
+            showToast={showToast}
+          />
           <button
             type="button"
             className="header-preferences-btn"
