@@ -46,14 +46,22 @@ import {
   DASHBOARD_WIDGET_METADATA,
   resolveDashboardWidgets,
 } from "@/lib/dashboard/types";
+import { CalendarSidebar } from "@/app/components/calendar/calendar-sidebar";
+import { MonthView } from "@/app/components/calendar/month-view";
 import { GoogleCalendarSettings } from "@/app/components/google-calendar-settings";
 import { UserProfileButton } from "@/app/components/auth/user-profile-button";
-import { executeTwoWaySync } from "@/lib/google-calendar/sync-service";
+import {
+  executeTwoWaySync,
+  fetchGoogleIntegrationStatus,
+} from "@/lib/google-calendar/sync-service";
 import {
   enqueueSyncAction,
   recordDeletedGoogleEventId,
 } from "@/lib/google-calendar/sync-queue";
-import type { GoogleCalendarSyncSettings } from "@/lib/google-calendar/types";
+import type {
+  GoogleCalendarSyncSettings,
+  GoogleIntegrationStatus,
+} from "@/lib/google-calendar/types";
 import { DEFAULT_GOOGLE_SYNC_SETTINGS } from "@/lib/google-calendar/types";
 
 type TaskTemplate = { id: string; name: string; title: string; notes: string; priority: PlannerTask["priority"]; recurrence: PlannerTask["recurrence"] };
@@ -110,8 +118,6 @@ const DEFAULT_PREFERENCES: PlannerPreferences = {
   dashboardWidgets: DEFAULT_DASHBOARD_WIDGETS,
   googleCalendarSync: DEFAULT_GOOGLE_SYNC_SETTINGS,
 };
-
-const monthName = (date: Date) => date.toLocaleDateString("en", { month: "long", year: "numeric" });
 
 type TaskOptionId =
   | "p1"
@@ -1698,7 +1704,7 @@ export default function HomePage() {
   const [editRecurrence, setEditRecurrence] = useState<PlannerTask["recurrence"]>("none");
   const [editStatus, setEditStatus] = useState<PlannerTask["status"]>("open");
   const [monthOffset, setMonthOffset] = useState(0);
-  const [view, setView] = useState<AppView>("dashboard");
+  const [view, setView] = useState<AppView>("month");
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [taskFilter, setTaskFilter] = useState<"all" | "open" | "completed">("all");
   const [taskSearch, setTaskSearch] = useState("");
@@ -1803,17 +1809,14 @@ export default function HomePage() {
   // Toast state
   const [toast, setToast] = useState<string | null>(null);
 
+  // Google integration status & sidebar toggle state
+  const [googleStatus, setGoogleStatus] = useState<GoogleIntegrationStatus | null>(null);
+  const [localCalendarEnabled, setLocalCalendarEnabled] = useState(true);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
   const today = new Date();
   const shownDate = new Date(today.getFullYear(), today.getMonth() + monthOffset, 1);
   const shownYear = today.getFullYear() + yearOffset;
-
-  const calendarDays = useMemo(() => {
-    const dayOfWeek = new Date(shownDate.getFullYear(), shownDate.getMonth(), 1).getDay();
-    const offset = (dayOfWeek - preferences.weekStartsOn + 7) % 7;
-    const count = new Date(shownDate.getFullYear(), shownDate.getMonth() + 1, 0).getDate();
-    return [...Array.from({ length: offset }, () => null), ...Array.from({ length: count }, (_, i) => i + 1)];
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shownDate.getFullYear(), shownDate.getMonth(), preferences.weekStartsOn]);
 
   // Week view computed values
   const weekDays = useMemo(() => {
@@ -1846,10 +1849,20 @@ export default function HomePage() {
     );
   }, [activeCalendarConfigs]);
 
+  const activeCalendarCount = useMemo(() => {
+    let count = localCalendarEnabled ? 1 : 0;
+    count += Object.values(activeCalendarConfigs).filter((cal) => cal.enabled).length;
+    return count;
+  }, [localCalendarEnabled, activeCalendarConfigs]);
+
   // Filter tasks based on disabled calendars and user's calendar/client selection
   const displayedTasks = useMemo(() => {
     return tasks.filter((task) => {
-      // 1. Exclude events belonging to calendars that were toggled off in settings
+      // 0. Exclude local tasks if local planner is toggled off
+      if (!localCalendarEnabled && !task.isGoogleEvent && !task.googleCalendarId) {
+        return false;
+      }
+      // 1. Exclude events belonging to calendars that were toggled off in settings or sidebar
       if (task.googleCalendarId && activeCalendarConfigs[task.googleCalendarId]?.enabled === false) {
         return false;
       }
@@ -1862,7 +1875,7 @@ export default function HomePage() {
       }
       return true;
     });
-  }, [tasks, activeCalendarConfigs, calendarFilter]);
+  }, [tasks, activeCalendarConfigs, calendarFilter, localCalendarEnabled]);
 
   // Tasks grouped for the weekly kanban board
   const weekDateKeys = useMemo(() => new Set(weekDays.map(toDateKey)), [weekDays]);
@@ -1900,7 +1913,6 @@ export default function HomePage() {
     return (a.dueDate ?? "9999").localeCompare(b.dueDate ?? "9999") || a.createdAt.localeCompare(b.createdAt);
   });
 
-  const formatDateKey = (day: number) => [shownDate.getFullYear(), String(shownDate.getMonth() + 1).padStart(2, "0"), String(day).padStart(2, "0")].join("-");
   const isOverdue = (task: PlannerTask) => task.status !== "completed" && Boolean(task.dueDate && task.dueDate < todayKey);
   const nextOccurrenceDate = (dateKey: string, recurrence: PlannerTask["recurrence"]) => {
     const [year, month, day] = dateKey.split("-").map(Number);
@@ -1978,6 +1990,83 @@ export default function HomePage() {
 
   const [isSyncingGoogle, setIsSyncingGoogle] = useState(false);
 
+  const refreshGoogleStatus = useCallback(async () => {
+    try {
+      const status = await fetchGoogleIntegrationStatus();
+      setGoogleStatus(status);
+      if (status.calendars && status.calendars.length > 0) {
+        const existingConfigs = preferences.googleCalendarSync?.calendarConfigs || {};
+        let changed = false;
+        const mergedConfigs = { ...existingConfigs };
+        for (const cal of status.calendars) {
+          if (!mergedConfigs[cal.id]) {
+            mergedConfigs[cal.id] = cal;
+            changed = true;
+          }
+        }
+        if (changed) {
+          savePreferences({
+            ...preferences,
+            googleCalendarSync: {
+              ...(preferences.googleCalendarSync || DEFAULT_GOOGLE_SYNC_SETTINGS),
+              enabled: true,
+              calendarConfigs: mergedConfigs,
+            },
+          });
+        }
+      }
+    } catch {
+      // Best effort when offline
+    }
+  }, [preferences]);
+
+  useEffect(() => {
+    void refreshGoogleStatus();
+  }, [refreshGoogleStatus]);
+
+  const handleToggleCalendar = useCallback((calendarId: string) => {
+    const currentSync = preferences.googleCalendarSync || DEFAULT_GOOGLE_SYNC_SETTINGS;
+    const currentConfig = currentSync.calendarConfigs[calendarId];
+    if (currentConfig) {
+      const nextConfigs = {
+        ...currentSync.calendarConfigs,
+        [calendarId]: {
+          ...currentConfig,
+          enabled: !currentConfig.enabled,
+        },
+      };
+      savePreferences({
+        ...preferences,
+        googleCalendarSync: {
+          ...currentSync,
+          calendarConfigs: nextConfigs,
+        },
+      });
+    } else if (googleStatus?.calendars) {
+      const found = googleStatus.calendars.find((c) => c.id === calendarId);
+      if (found) {
+        const nextConfigs = {
+          ...currentSync.calendarConfigs,
+          [calendarId]: {
+            ...found,
+            enabled: false,
+          },
+        };
+        savePreferences({
+          ...preferences,
+          googleCalendarSync: {
+            ...currentSync,
+            calendarConfigs: nextConfigs,
+          },
+        });
+      }
+    }
+  }, [preferences, googleStatus]);
+
+  const handleConnectGoogle = useCallback(() => {
+    window.location.href = "/api/auth/google";
+  }, []);
+
   const handleSyncGoogle = useCallback(async () => {
     setIsSyncingGoogle(true);
     try {
@@ -2025,13 +2114,18 @@ export default function HomePage() {
       showToast(`Sync error: ${msg}`);
     } finally {
       setIsSyncingGoogle(false);
+      void refreshGoogleStatus();
     }
-  }, [preferences, tasks, showToast]);
+  }, [preferences, tasks, showToast, refreshGoogleStatus]);
 
   // Check for Google OAuth callback parameters in URL
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
+    const viewParam = params.get("view") as AppView | null;
+    if (viewParam && NAV_VIEWS.some((v) => v.id === viewParam)) {
+      setView(viewParam);
+    }
     const gcalStatus = params.get("gcal_status");
     const gcalError = params.get("gcal_error");
 
@@ -3177,8 +3271,6 @@ export default function HomePage() {
   };
 
   // --- Render ---
-  const isCalendarView = view === "month" || view === "agenda";
-
   const renderSelectedDateBanner = () => {
     if (!selectedDate) return null;
     const selectedDateTasks = displayedTasks.filter((t) => t.dueDate === selectedDate);
@@ -3857,7 +3949,7 @@ export default function HomePage() {
     </header>
 
     <section className="main-panel">
-      <div className={view === "dashboard" ? "content-single" : view === "kanban" ? "content-single" : view === "week" ? "content-single" : view === "year" ? "content-single" : view === "yearline" ? "content-single" : "content-grid"}>
+      <div className={view === "agenda" ? "content-grid" : "content-single"}>
         {/* ===== DASHBOARD VIEW (Personal Planning Command Center) ===== */}
         {view === "dashboard" && (
           <DashboardView
@@ -4161,8 +4253,61 @@ export default function HomePage() {
           </section>
         )}
 
-        {/* ===== EXISTING CALENDAR CARD (Month/Year/Agenda views) ===== */}
-        {isCalendarView && (
+        {/* ===== GOOGLE CALENDAR-STYLE MONTH WORKSPACE ===== */}
+        {view === "month" && (
+          <div className="month-workspace-container">
+            <CalendarSidebar
+              currentShownDate={shownDate}
+              selectedDate={selectedDate}
+              onSelectDate={(dateKey) => {
+                setSelectedDate(dateKey);
+                setNewDueDate(dateKey || "");
+              }}
+              onNavigateMonth={(offset) => setMonthOffset((curr) => curr + offset)}
+              weekStartsOn={preferences.weekStartsOn}
+              tasks={tasks}
+              onAddEvent={(dateKey) => openAddTask({ date: dateKey || selectedDate || todayKey, status: "open" })}
+              onAddTask={(dateKey) => openAddTask({ date: dateKey || selectedDate || todayKey, status: "open" })}
+              localCalendarEnabled={localCalendarEnabled}
+              onToggleLocalCalendar={() => setLocalCalendarEnabled((prev) => !prev)}
+              googleStatus={googleStatus}
+              calendarConfigs={activeCalendarConfigs}
+              onToggleCalendar={handleToggleCalendar}
+              onConnectGoogle={handleConnectGoogle}
+              onSyncGoogle={handleSyncGoogle}
+              isSyncingGoogle={isSyncingGoogle}
+              isOpenOnMobile={mobileSidebarOpen}
+              onCloseMobile={() => setMobileSidebarOpen(false)}
+            />
+            <MonthView
+              shownDate={shownDate}
+              today={today}
+              todayKey={todayKey}
+              selectedDate={selectedDate}
+              onSelectDate={(dateKey) => {
+                setSelectedDate(dateKey);
+                setNewDueDate(dateKey || "");
+              }}
+              onNavigateMonth={(offset) => setMonthOffset((curr) => curr + offset)}
+              onResetToToday={() => {
+                setMonthOffset(0);
+                setSelectedDate(todayKey);
+                setNewDueDate(todayKey);
+              }}
+              weekStartsOn={preferences.weekStartsOn}
+              resolvedTheme={resolvedTheme}
+              tasks={displayedTasks}
+              allCalendarConfigs={activeCalendarConfigs}
+              onAddTask={(options) => openAddTask({ date: options?.date || selectedDate || todayKey, time: options?.time, status: options?.status || "open" })}
+              onOpenTaskDetail={openTaskDetail}
+              onToggleMobileSidebar={() => setMobileSidebarOpen((prev) => !prev)}
+              activeCalendarCount={activeCalendarCount}
+            />
+          </div>
+        )}
+
+        {/* ===== EXISTING AGENDA CALENDAR CARD ===== */}
+        {view === "agenda" && (
           <section
             className="calendar-card neo-card"
             id="calendar"
@@ -4171,27 +4316,51 @@ export default function HomePage() {
             <div className="card-header">
               <div>
                 <span className="section-kicker">THE BIG PICTURE</span>
-                <h2>
-                  {view === "month" ? (
-                    <span className="month-heading-with-badge">
-                      <span
-                        className="month-header-badge"
-                        style={{
-                          backgroundColor: getMonthColor(resolvedTheme, shownDate.getMonth()).bg,
-                          borderColor: getMonthColor(resolvedTheme, shownDate.getMonth()).border,
-                          color: getMonthColor(resolvedTheme, shownDate.getMonth()).text,
-                        }}
-                      >
-                        {monthName(shownDate)}
-                      </span>
-                    </span>
-                  ) : (
-                    "Agenda"
-                  )}
-                </h2>
+                <h2>Agenda</h2>
               </div>
               <div className="calendar-actions">
-                {view === "agenda" && (
+                <button
+                  type="button"
+                  className="agenda-add-task-header-btn"
+                  onClick={() => openAddTask({ date: selectedDate || todayKey, status: "open" })}
+                >
+                  <Plus size={14} weight="bold" />
+                  <span>Add Task</span>
+                </button>
+              </div>
+            </div>
+            <div className="agenda-list">
+              {displayedTasks.filter((task) => task.dueDate).slice().sort((a, b) => {
+                const aPinned = a.isPinned ? 1 : 0;
+                const bPinned = b.isPinned ? 1 : 0;
+                if (aPinned !== bPinned) return bPinned - aPinned;
+                return (a.dueDate ?? "").localeCompare(b.dueDate ?? "") || (a.dueTime ?? "99:99").localeCompare(b.dueTime ?? "99:99");
+              }).map((task) => (
+                <button type="button" className={"agenda-item " + (task.status === "completed" ? "is-done" : "") + (task.isPinned ? " is-pinned" : "")} key={task.id} onClick={() => openTaskDetail(task)}>
+                  <span className="agenda-date">{new Date(task.dueDate + "T12:00:00").toLocaleDateString("en", { month: "short", day: "numeric" })}</span>
+                  <span className="agenda-task-title">
+                    <span className="agenda-task-name">
+                      {task.isPinned && <span className="task-row-pin" title="Pinned">📌</span>}
+                      {task.title}
+                    </span>
+                    <small>{task.dueTime ? new Date("2000-01-01T" + task.dueTime).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" }) : "All day"}{task.status === "completed" ? " · Completed" : ""}</small>
+                  </span>
+                  <div className="agenda-badges">
+                    {task.isPersonal && <span className="badge-chip badge-personal" title="Personal: Optional category for life tasks">🌿 Personal</span>}
+                    {task.timingPreference === "whenever" && <span className="badge-chip badge-whenever" title="Whenever: No specific deadline">🟢 Whenever</span>}
+                    {task.labelIds && task.labelIds.length > 0 && task.labelIds.map((id) => {
+                      const labelObj = labels.find((l) => l.id === id);
+                      return labelObj ? (
+                        <span key={id} className="task-label-chip">🏷️ {labelObj.name}</span>
+                      ) : null;
+                    })}
+                    <span className={"priority-badge priority-" + task.priority}>{priorityEmoji(task.priority)} {priorityLabel(task.priority)}</span>
+                  </div>
+                </button>
+              ))}
+              {tasks.every((task) => !task.dueDate) && (
+                <div className="agenda-empty-state">
+                  <p className="empty-tasks">Add a due date to a task and it will appear here.</p>
                   <button
                     type="button"
                     className="agenda-add-task-header-btn"
@@ -4200,169 +4369,9 @@ export default function HomePage() {
                     <Plus size={14} weight="bold" />
                     <span>Add Task</span>
                   </button>
-                )}
-                {view === "month" && (
-                  <>
-                    <button className="icon-button" aria-label="Previous month" onClick={() => setMonthOffset((n) => n - 1)}>←</button>
-                    <button className="icon-button" aria-label="Next month" onClick={() => setMonthOffset((n) => n + 1)}>→</button>
-                  </>
-                )}
-              </div>
+                </div>
+              )}
             </div>
-            {view === "month" ? (
-              <div className="calendar-grid">
-                {["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]
-                  .slice(preferences.weekStartsOn)
-                  .concat(["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"].slice(0, preferences.weekStartsOn))
-                  .map((day) => (
-                    <div className="weekday" key={day}>{day}</div>
-                  ))}
-                {calendarDays.map((day, index) => {
-                  const isToday = day === today.getDate() && shownDate.getMonth() === today.getMonth() && shownDate.getFullYear() === today.getFullYear();
-                  const dateKey = day ? formatDateKey(day) : "";
-                  const dueTasks = day ? displayedTasks.filter((task) => task.dueDate === dateKey) : [];
-                  const taskCount = dueTasks.length;
-                  const openCount = dueTasks.filter((task) => task.status !== "completed").length;
-                  const isSelected = Boolean(day && selectedDate === dateKey);
-                  const dayDate = day ? new Date(shownDate.getFullYear(), shownDate.getMonth(), day) : null;
-                  const isWeekend = dayDate ? (dayDate.getDay() === 0 || dayDate.getDay() === 6) : false;
-
-                  return (
-                    <div
-                      className={"day-cell " + (!day ? "empty " : "") + (isToday ? "today " : "") + (isSelected ? "selected-day " : "") + (isWeekend ? "is-weekend " : "") + (taskCount ? "has-tasks " : "")}
-                      key={shownDate.getMonth() + "-" + index}
-                      style={{
-                        ...(isWeekend && !isSelected && !isToday ? { backgroundColor: resolvedTheme.weekendBg } : {}),
-                      }}
-                      onClick={() => {
-                        if (!day) return;
-                        setSelectedDate(dateKey);
-                      }}
-                      role={day ? "button" : undefined}
-                      tabIndex={day ? 0 : undefined}
-                      onKeyDown={(e) => {
-                        if (!day) return;
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          setSelectedDate(dateKey);
-                        }
-                      }}
-                      aria-pressed={isSelected}
-                      aria-label={day ? `${dateKey}${taskCount ? `, ${taskCount} tasks due, ${openCount} still open` : ", no tasks due"}` : "Empty calendar cell"}
-                    >
-                      <div className="day-cell-header">
-                        <span className="day-number">{day ?? ""}</span>
-                        {taskCount > 0 && <span className="calendar-task-count" aria-hidden="true">{taskCount}</span>}
-                      </div>
-
-                      {/* Mobile Task Activity Dots (<=650px) */}
-                      {day && dueTasks.length > 0 && (
-                        <div className="day-cell-mobile-dots" aria-hidden="true">
-                          {dueTasks.slice(0, 3).map((t) => (
-                            <span
-                              key={t.id}
-                              className={`day-cell-mobile-dot priority-dot-${t.priority} ${t.status === "completed" ? "is-done" : ""}`}
-                            />
-                          ))}
-                          {dueTasks.length > 3 && (
-                            <span className="day-cell-mobile-more">+{dueTasks.length - 3}</span>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Desktop Task Pills (>650px) */}
-                      {day && dueTasks.length > 0 && (
-                        <div className="day-cell-tasks">
-                          {dueTasks.slice(0, 2).map((task) => (
-                            <div
-                              key={task.id}
-                              className={`calendar-task-pill priority-accent-${task.priority} ${task.isPinned ? "is-pinned" : ""} ${task.status === "completed" ? "is-done" : ""}`}
-                              title={`${task.isGoogleEvent ? `[${task.googleCalendarName || "Google"}] ` : ""}${task.title} · ${priorityLabel(task.priority)}${task.isPinned ? " · Pinned" : ""}${task.isPersonal ? " · Personal" : ""}${task.timingPreference === "whenever" ? " · Whenever" : ""}`}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openTaskDetail(task);
-                              }}
-                              role="button"
-                              tabIndex={0}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter" || e.key === " ") {
-                                  e.stopPropagation();
-                                  e.preventDefault();
-                                  openTaskDetail(task);
-                                }
-                              }}
-                            >
-                              {task.isPinned && <span className="task-pill-pin" title="Pinned">📌</span>}
-                              {task.isGoogleEvent ? (
-                                <span
-                                  className="calendar-gcal-dot"
-                                  style={{ backgroundColor: task.googleCalendarColor || "#4285F4" }}
-                                  title={`Google: ${task.googleCalendarName || "Calendar"}`}
-                                />
-                              ) : (
-                                <span className={`calendar-task-dot priority-dot-${task.priority}`} />
-                              )}
-                              <span className="calendar-task-pill-title">
-                                {task.isPersonal && <span className="task-pill-badge-icon" title="Personal">🌿</span>}
-                                {task.timingPreference === "whenever" && <span className="task-pill-badge-icon" title="Whenever">🟢</span>}
-                                {task.title}
-                              </span>
-                            </div>
-                          ))}
-                          {dueTasks.length > 2 && (
-                            <span className="calendar-task-more">+{dueTasks.length - 2} more</span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="agenda-list">
-                {displayedTasks.filter((task) => task.dueDate).slice().sort((a, b) => {
-                  const aPinned = a.isPinned ? 1 : 0;
-                  const bPinned = b.isPinned ? 1 : 0;
-                  if (aPinned !== bPinned) return bPinned - aPinned;
-                  return (a.dueDate ?? "").localeCompare(b.dueDate ?? "") || (a.dueTime ?? "99:99").localeCompare(b.dueTime ?? "99:99");
-                }).map((task) => (
-                  <button type="button" className={"agenda-item " + (task.status === "completed" ? "is-done" : "") + (task.isPinned ? " is-pinned" : "")} key={task.id} onClick={() => openTaskDetail(task)}>
-                    <span className="agenda-date">{new Date(task.dueDate + "T12:00:00").toLocaleDateString("en", { month: "short", day: "numeric" })}</span>
-                    <span className="agenda-task-title">
-                      <span className="agenda-task-name">
-                        {task.isPinned && <span className="task-row-pin" title="Pinned">📌</span>}
-                        {task.title}
-                      </span>
-                      <small>{task.dueTime ? new Date("2000-01-01T" + task.dueTime).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" }) : "All day"}{task.status === "completed" ? " · Completed" : ""}</small>
-                    </span>
-                    <div className="agenda-badges">
-                      {task.isPersonal && <span className="badge-chip badge-personal" title="Personal: Optional category for life tasks">🌿 Personal</span>}
-                      {task.timingPreference === "whenever" && <span className="badge-chip badge-whenever" title="Whenever: No specific deadline">🟢 Whenever</span>}
-                      {task.labelIds && task.labelIds.length > 0 && task.labelIds.map((id) => {
-                        const labelObj = labels.find((l) => l.id === id);
-                        return labelObj ? (
-                          <span key={id} className="task-label-chip">🏷️ {labelObj.name}</span>
-                        ) : null;
-                      })}
-                      <span className={"priority-badge priority-" + task.priority}>{priorityEmoji(task.priority)} {priorityLabel(task.priority)}</span>
-                    </div>
-                  </button>
-                ))}
-                {tasks.every((task) => !task.dueDate) && (
-                  <div className="agenda-empty-state">
-                    <p className="empty-tasks">Add a due date to a task and it will appear here.</p>
-                    <button
-                      type="button"
-                      className="agenda-add-task-header-btn"
-                      onClick={() => openAddTask({ date: selectedDate || todayKey, status: "open" })}
-                    >
-                      <Plus size={14} weight="bold" />
-                      <span>Add Task</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
             <div className="calendar-footer">
               <span className="legend"><i className="day-dot pink" /> Tasks due</span>
               <button type="button" className="clear-date-button" onClick={() => { setSelectedDate(null); }} disabled={!selectedDate}>Clear date</button>
@@ -4371,11 +4380,11 @@ export default function HomePage() {
           </section>
         )}
 
-        {/* Selected Date Quick Banner for Month & Agenda views */}
-        {isCalendarView && selectedDate && renderSelectedDateBanner()}
+        {/* Selected Date Quick Banner for Agenda view */}
+        {view === "agenda" && selectedDate && renderSelectedDateBanner()}
 
-        {/* ===== DASHBOARD SIDEBAR (Daily Habits + Tasks, visible in calendar views) ===== */}
-        {isCalendarView && (
+        {/* ===== DASHBOARD SIDEBAR (Daily Habits + Tasks, visible only in agenda view) ===== */}
+        {view === "agenda" && (
           <div className="dashboard-sidebar">
             <DailyHabitsWidget
               todayKey={todayKey}
