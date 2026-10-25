@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getVerifiedSession } from "@/lib/server/session";
+import { getVerifiedSession, encodeSignedSession, SIGNED_SESSION_COOKIE_NAME } from "@/lib/server/session";
 import { verifySignedOAuthState } from "@/lib/server/crypto";
 import { exchangeOAuthCode } from "@/lib/server/google-calendar";
 import { saveEncryptedCredentials } from "@/lib/server/google-token-store";
@@ -44,7 +44,8 @@ export async function GET(request: Request) {
   const stateVerification = verifySignedOAuthState(state, session.sessionId, undefined, session.userId);
   if (!stateVerification.valid) {
     console.error("[Auth/GoogleCallback] State verification failed:", stateVerification.error);
-    const redirectUrl = new URL("/", baseUrl);
+    const destination = stateVerification.returnUrl || "/";
+    const redirectUrl = new URL(destination, baseUrl);
     redirectUrl.searchParams.set("gcal_error", stateVerification.error || "invalid_state");
     return NextResponse.redirect(redirectUrl.toString());
   }
@@ -81,7 +82,16 @@ export async function GET(request: Request) {
     if (tokenResult.userEmail) {
       redirectUrl.searchParams.set("gcal_account", tokenResult.userEmail);
     }
-    return NextResponse.redirect(redirectUrl.toString());
+    const response = NextResponse.redirect(redirectUrl.toString());
+    const token = encodeSignedSession(session);
+    response.cookies.set(SIGNED_SESSION_COOKIE_NAME, token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: 14 * 24 * 60 * 60,
+    });
+    return response;
   } catch (err) {
     const message = err instanceof Error ? err.message : "Token exchange failed.";
     console.error("[Auth/GoogleCallback] Exchange failed:", message);

@@ -6601,7 +6601,8 @@ html, body {
   box-sizing: border-box;
 }
 
-.month-workspace-container {
+.month-workspace-container,
+.week-workspace-container {
   display: flex;
   gap: 20px;
   align-items: flex-start;
@@ -6609,6 +6610,51 @@ html, body {
   min-width: 0;
   box-sizing: border-box;
   position: relative;
+}
+
+.week-workspace-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.weekly-planner-header-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.week-save-error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #fff1f2;
+  border: 2px solid #e11d48;
+  border-radius: 8px;
+  margin-top: 12px;
+  color: #9f1239;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.week-error-dismiss-btn {
+  background: transparent;
+  border: none;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  color: #9f1239;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: background 0.12s ease;
+}
+
+.week-error-dismiss-btn:hover {
+  background: rgba(0, 0, 0, 0.08);
 }
 
 /* --------------------------------------------------------------------------
@@ -7803,7 +7849,8 @@ html, body {
 
 /* Mobile (<= 768px) */
 @media (max-width: 768px) {
-  .month-workspace-container {
+  .month-workspace-container,
+  .week-workspace-container {
     flex-direction: column;
     gap: 0;
   }

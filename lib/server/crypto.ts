@@ -323,12 +323,19 @@ export function verifySignedOAuthState(
     const raw = Buffer.from(dataB64, "base64url").toString("utf8");
     const parsed: OAuthStatePayload = JSON.parse(raw);
 
-    if (parsed.sessionId !== expectedSessionId) {
-      return { valid: false, error: "State session does not match authenticated user." };
-    }
-
+    // 1. Cross-user rejection check: If state has a bound userId and expectedUserId is specified, they must match
     if (expectedUserId && parsed.userId && parsed.userId !== expectedUserId) {
       return { valid: false, error: "State user identity does not match authenticated user." };
+    }
+
+    // 2. Session / user binding check:
+    // If both state and session are bound to the same verified user ID, verify user identity;
+    // otherwise require exact session ID match (essential for unauthenticated guest sessions).
+    const isUserMatch = Boolean(expectedUserId && parsed.userId && parsed.userId === expectedUserId);
+    const isSessionMatch = Boolean(expectedSessionId && parsed.sessionId === expectedSessionId);
+
+    if (!isSessionMatch && !isUserMatch) {
+      return { valid: false, error: "State session does not match authenticated user." };
     }
 
     const now = Date.now();

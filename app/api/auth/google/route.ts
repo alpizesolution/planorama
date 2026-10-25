@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getOrCreateSession } from "@/lib/server/session";
+import { getOrCreateSession, encodeSignedSession, SIGNED_SESSION_COOKIE_NAME } from "@/lib/server/session";
 import { createSignedOAuthState, validateRedirectUrl } from "@/lib/server/crypto";
 import { buildGoogleAuthUrl } from "@/lib/server/google-calendar";
 
@@ -24,7 +24,16 @@ export async function GET(request: Request) {
     const state = createSignedOAuthState(session.sessionId, returnUrl, session.userId);
     const authUrl = buildGoogleAuthUrl(state, true);
 
-    return NextResponse.redirect(authUrl);
+    const response = NextResponse.redirect(authUrl);
+    const token = encodeSignedSession(session);
+    response.cookies.set(SIGNED_SESSION_COOKIE_NAME, token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: 14 * 24 * 60 * 60,
+    });
+    return response;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to initiate Google authorization.";
     console.error("[Auth/Google] Error:", message);

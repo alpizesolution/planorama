@@ -14,6 +14,7 @@ import {
   Palette,
   SquaresFour,
   ArrowClockwise,
+  SidebarSimple,
 } from "@phosphor-icons/react";
 import { createTask, getTasks, removeTask, updateTask } from "@/lib/schedule/task-service";
 import type { PlannerTask, PlannerPreferences } from "@/lib/schedule/types";
@@ -1814,9 +1815,15 @@ export default function HomePage() {
   const [localCalendarEnabled, setLocalCalendarEnabled] = useState(true);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
-  const today = new Date();
+  const today = useMemo(() => new Date(), []);
   const shownDate = new Date(today.getFullYear(), today.getMonth() + monthOffset, 1);
   const shownYear = today.getFullYear() + yearOffset;
+
+  // Mini-calendar date for sidebar (in week view, follows weekly anchor date + month offset)
+  const miniCalendarShownDate = useMemo(() => {
+    const base = view === "week" ? weeklyAnchorDate : today;
+    return new Date(base.getFullYear(), base.getMonth() + monthOffset, 1);
+  }, [view, weeklyAnchorDate, today, monthOffset]);
 
   // Week view computed values
   const weekDays = useMemo(() => {
@@ -2064,7 +2071,8 @@ export default function HomePage() {
   }, [preferences, googleStatus]);
 
   const handleConnectGoogle = useCallback(() => {
-    window.location.href = "/api/auth/google";
+    const returnUrl = typeof window !== "undefined" ? window.location.pathname + window.location.search : "/";
+    window.location.href = `/api/auth/google?returnUrl=${encodeURIComponent(returnUrl)}`;
   }, []);
 
   const handleSyncGoogle = useCallback(async () => {
@@ -2139,7 +2147,16 @@ export default function HomePage() {
       // Automatically trigger initial synchronization
       void handleSyncGoogle();
     } else if (gcalError) {
-      setSaveError(`Google Calendar connection failed: ${decodeURIComponent(gcalError)}`);
+      const decodedError = decodeURIComponent(gcalError);
+      const friendlyError = decodedError.includes("expired")
+        ? "Google authorization timed out. Please try connecting again."
+        : decodedError.includes("replay attack prevented")
+        ? "Authorization request already completed. Please reconnect if needed."
+        : decodedError.includes("does not match")
+        ? "Google Calendar connection session expired or changed. Please reconnect."
+        : `Google Calendar connection failed: ${decodedError}`;
+      setSaveError(friendlyError);
+      showToast(`Connection notice: ${friendlyError}`);
       const url = new URL(window.location.href);
       url.searchParams.delete("gcal_error");
       window.history.replaceState({}, "", url.pathname + url.search);
@@ -3365,9 +3382,22 @@ export default function HomePage() {
   const renderWeeklyPlanner = (isYearSection = false) => (
     <section className="weekly-planner-card neo-card" id="week-view" ref={isYearSection ? weeklyPlannerRef : undefined}>
       <div className="weekly-planner-header">
-        <div>
-          <span className="section-kicker">{isYearSection ? "WEEKLY PLANNER" : "WEEKLY OVERVIEW"}</span>
-          <h2>{formatWeekRange(weekDays)}</h2>
+        <div className="weekly-planner-header-title-wrap">
+          {!isYearSection && (
+            <button
+              type="button"
+              className="mobile-sidebar-toggle-btn week-mobile-sidebar-btn"
+              onClick={() => setMobileSidebarOpen((prev) => !prev)}
+              aria-label="Toggle calendar sidebar"
+            >
+              <SidebarSimple size={18} weight="bold" />
+              <span>Calendars</span>
+            </button>
+          )}
+          <div>
+            <span className="section-kicker">{isYearSection ? "WEEKLY PLANNER" : "WEEKLY OVERVIEW"}</span>
+            <h2>{formatWeekRange(weekDays)}</h2>
+          </div>
         </div>
         <div className="weekly-planner-actions">
           <div className="segmented" aria-label="Weekly layout mode">
@@ -3393,7 +3423,19 @@ export default function HomePage() {
           </div>
         </div>
       </div>
-      {saveError && <p className="save-error" role="status" style={{ marginTop: 12, marginBottom: 0 }}>{saveError}</p>}
+      {saveError && (
+        <div className="week-save-error-banner" role="status">
+          <p className="save-error" style={{ margin: 0 }}>{saveError}</p>
+          <button
+            type="button"
+            className="week-error-dismiss-btn"
+            onClick={() => setSaveError("")}
+            aria-label="Dismiss message"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {weeklyViewMode === "timeline" ? (
         <>
@@ -4143,7 +4185,41 @@ export default function HomePage() {
         )}
 
         {/* ===== WEEK VIEW ===== */}
-        {view === "week" && renderWeeklyPlanner(false)}
+        {view === "week" && (
+          <div className="month-workspace-container week-workspace-container">
+            <CalendarSidebar
+              currentShownDate={miniCalendarShownDate}
+              selectedDate={selectedDate}
+              onSelectDate={(dateKey) => {
+                setSelectedDate(dateKey);
+                setNewDueDate(dateKey || "");
+                if (dateKey) {
+                  const [y, m, d] = dateKey.split("-").map(Number);
+                  const clicked = new Date(y, m - 1, d);
+                  setWeeklyAnchorDate(clicked);
+                }
+              }}
+              onNavigateMonth={(offset) => setMonthOffset((curr) => curr + offset)}
+              weekStartsOn={preferences.weekStartsOn}
+              tasks={tasks}
+              onAddEvent={(dateKey) => openAddTask({ date: dateKey || selectedDate || toDateKey(weeklyAnchorDate) || todayKey, status: "open" })}
+              onAddTask={(dateKey) => openAddTask({ date: dateKey || selectedDate || toDateKey(weeklyAnchorDate) || todayKey, status: "open" })}
+              localCalendarEnabled={localCalendarEnabled}
+              onToggleLocalCalendar={() => setLocalCalendarEnabled((prev) => !prev)}
+              googleStatus={googleStatus}
+              calendarConfigs={activeCalendarConfigs}
+              onToggleCalendar={handleToggleCalendar}
+              onConnectGoogle={handleConnectGoogle}
+              onSyncGoogle={handleSyncGoogle}
+              isSyncingGoogle={isSyncingGoogle}
+              isOpenOnMobile={mobileSidebarOpen}
+              onCloseMobile={() => setMobileSidebarOpen(false)}
+            />
+            <div className="week-workspace-main">
+              {renderWeeklyPlanner(false)}
+            </div>
+          </div>
+        )}
 
         {/* ===== KANBAN VIEW ===== */}
         {view === "kanban" && (

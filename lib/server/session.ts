@@ -159,12 +159,28 @@ export async function getVerifiedSession(): Promise<SessionData | null> {
         return sessionFromBearer;
       }
 
-      // Check if it's a Firebase ID token
+  // Check if it's a Firebase ID token
       try {
         const verifiedFirebase = await verifyFirebaseIdToken(bearerToken);
         const now = Date.now();
+
+        // Check if an existing signed cookie exists for this Firebase user to align session IDs
+        let existingSessionId: string | undefined;
+        try {
+          const cookieStore = await cookies();
+          const signedCookie = cookieStore.get(SIGNED_SESSION_COOKIE_NAME)?.value;
+          if (signedCookie) {
+            const decoded = decodeSignedSession(signedCookie);
+            if (decoded && decoded.userId === verifiedFirebase.uid && decoded.sessionId) {
+              existingSessionId = decoded.sessionId;
+            }
+          }
+        } catch {
+          // Cookies not accessible
+        }
+
         return {
-          sessionId: `fb_${verifiedFirebase.uid}`,
+          sessionId: existingSessionId || `fb_${verifiedFirebase.uid}`,
           userId: verifiedFirebase.uid,
           isGuest: false,
           firebaseUid: verifiedFirebase.uid,
@@ -216,7 +232,8 @@ export async function getVerifiedSession(): Promise<SessionData | null> {
 
 /**
  * Upgrades the current session by verifying a client-supplied Firebase ID token.
- * Protects against session fixation by generating a new session ID while preserving state.
+ * Protects against session fixation by generating a new session ID on auth transition (guest -> user),
+ * while preserving the session ID if already authenticated as the same user.
  */
 export async function bindSessionToFirebaseUser(idToken: string): Promise<SessionData> {
   const verifiedUser: VerifiedFirebaseUser = await verifyFirebaseIdToken(idToken);
@@ -226,25 +243,32 @@ export async function bindSessionToFirebaseUser(idToken: string): Promise<Sessio
   const previousSession = await getVerifiedSession();
   const previousSessionId = previousSession?.sessionId;
 
-  // New session ID on auth transition (session fixation protection)
-  const newSessionId = crypto.randomUUID();
+  // Preserve existing session ID if already authenticated as this same user;
+  // generate a new session ID on auth transition (guest -> user or user change) for session fixation protection.
+  const isSameUser = Boolean(
+    previousSession &&
+    !previousSession.isGuest &&
+    previousSession.userId === verifiedUser.uid &&
+    previousSession.sessionId
+  );
+  const effectiveSessionId = isSameUser && previousSession ? previousSession.sessionId : crypto.randomUUID();
 
   const upgradedSession: SessionData = {
-    sessionId: newSessionId,
+    sessionId: effectiveSessionId,
     userId: verifiedUser.uid,
     isGuest: false,
     firebaseUid: verifiedUser.uid,
     email: verifiedUser.email,
     name: verifiedUser.name,
     picture: verifiedUser.picture,
-    createdAt: now,
+    createdAt: isSameUser && previousSession ? previousSession.createdAt : now,
     expiresAt: now + SESSION_MAX_AGE_SECONDS * 1000,
   };
 
   await writeSessionCookie(upgradedSession);
 
   // If previous guest session had connected Google accounts, migrate them to the Firebase UID
-  if (previousSessionId && previousSessionId !== newSessionId) {
+  if (previousSessionId && previousSessionId !== effectiveSessionId) {
     try {
       const { migrateSessionOwnership } = await import("./google-token-store");
       await migrateSessionOwnership(previousSessionId, upgradedSession.userId);
