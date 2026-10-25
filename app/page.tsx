@@ -2743,12 +2743,12 @@ export default function HomePage() {
 
       if (task.isReadOnlyCalendar) {
         if (task.googleEventId) {
-          recordDeletedGoogleEventId(task.googleEventId);
+          recordDeletedGoogleEventId(task.googleEventId, task.googleCalendarId, task.googleAccountId);
         }
       } else if (task.isGoogleEvent || task.googleEventId) {
         const deleteOnGoogle = preferences.googleCalendarSync?.deleteGoogleEventOnTaskDelete;
         if (task.googleEventId) {
-          recordDeletedGoogleEventId(task.googleEventId);
+          recordDeletedGoogleEventId(task.googleEventId, task.googleCalendarId, task.googleAccountId);
         }
         if (deleteOnGoogle && task.googleEventId && task.googleCalendarId) {
           enqueueSyncAction({

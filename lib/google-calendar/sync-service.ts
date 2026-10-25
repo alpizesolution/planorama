@@ -14,6 +14,7 @@ import {
   getSyncQueue,
   dequeueSyncItem,
   getDeletedGoogleEventIds,
+  isEventTombstoned,
   resolveEventConflict,
 } from "./sync-queue";
 
@@ -91,7 +92,8 @@ export function googleEventToPlannerTask(
   }
 
   const now = new Date().toISOString();
-  const taskId = existingTask?.id || `gcal-${calendar.id.slice(0, 16)}-${event.id}`;
+  const accountPrefix = calendar.accountId ? `${calendar.accountId.slice(0, 8)}-` : "";
+  const taskId = existingTask?.id || `gcal-${accountPrefix}${calendar.id.slice(0, 16)}-${event.id}`;
 
   return {
     id: taskId,
@@ -337,14 +339,18 @@ export async function executeTwoWaySync(
     if (event.status === "cancelled") continue;
 
     // Check tombstones (ignore events previously unlinked locally)
-    if (tombstones.has(event.id)) {
+    if (isEventTombstoned(event.id, calendar.id, calendar.accountId, tombstones)) {
       continue;
     }
 
-    // Find if task already exists with this googleEventId
+    // Find if task already exists with this composite event identity: (accountId, calendarId, eventId)
     let existingTask: PlannerTask | undefined;
     for (const task of tasksMap.values()) {
-      if (task.googleEventId === event.id) {
+      if (
+        task.googleEventId === event.id &&
+        (!task.googleCalendarId || task.googleCalendarId === calendar.id) &&
+        (!task.googleAccountId || !calendar.accountId || task.googleAccountId === calendar.accountId)
+      ) {
         existingTask = task;
         break;
       }
