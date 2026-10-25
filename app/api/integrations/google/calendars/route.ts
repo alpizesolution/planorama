@@ -18,16 +18,20 @@ const PLANORAMA_ACCENT_COLORS = [
 
 /**
  * GET /api/integrations/google/calendars
- * Fetches user-accessible calendars from Google (personal, secondary, and shared client calendars).
+ * Fetches user-accessible calendars from Google across all connected accounts
+ * (personal, secondary, and shared client calendars).
  */
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const sessionId = await getVerifiedSessionId();
     if (!sessionId) {
       return NextResponse.json({ error: "Session required." }, { status: 401 });
     }
 
-    const items = await fetchCalendarList(sessionId);
+    const { searchParams } = new URL(request.url);
+    const accountId = searchParams.get("accountId") || undefined;
+
+    const items = await fetchCalendarList(sessionId, accountId);
 
     const calendars: GoogleCalendarConfig[] = items.map((cal, idx) => ({
       id: cal.id,
@@ -39,6 +43,8 @@ export async function GET() {
       enabled: Boolean(cal.primary), // default primary calendar to enabled
       syncDirection: cal.accessRole === "reader" || cal.accessRole === "freeBusyReader" ? "import_only" : "two_way",
       privacyMode: cal.accessRole === "freeBusyReader" ? "availability_only" : "full_details",
+      accountId: cal.accountId,
+      accountEmail: cal.accountEmail,
     }));
 
     return NextResponse.json({ calendars });

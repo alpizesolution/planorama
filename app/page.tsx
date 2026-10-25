@@ -49,6 +49,10 @@ import {
 import { GoogleCalendarSettings } from "@/app/components/google-calendar-settings";
 import { UserProfileButton } from "@/app/components/auth/user-profile-button";
 import { executeTwoWaySync } from "@/lib/google-calendar/sync-service";
+import {
+  enqueueSyncAction,
+  recordDeletedGoogleEventId,
+} from "@/lib/google-calendar/sync-queue";
 import type { GoogleCalendarSyncSettings } from "@/lib/google-calendar/types";
 import { DEFAULT_GOOGLE_SYNC_SETTINGS } from "@/lib/google-calendar/types";
 
@@ -1147,6 +1151,7 @@ interface AddTaskModalProps {
   preferences: PlannerPreferences;
   labels: TaskLabel[];
   onAddLabel: (name?: string) => TaskLabel | null;
+  writableCalendars?: import("@/lib/google-calendar/types").GoogleCalendarConfig[];
   onSaveTask: (taskData: {
     title: string;
     dueDate: string | null;
@@ -1158,6 +1163,8 @@ interface AddTaskModalProps {
     timingPreference: "scheduled" | "whenever";
     labelIds: string[];
     notes: string;
+    location?: string;
+    googleCalendarId?: string;
   }) => Promise<boolean>;
 }
 
@@ -1170,11 +1177,14 @@ function AddTaskModal({
   preferences,
   labels,
   onAddLabel,
+  writableCalendars = [],
   onSaveTask,
 }: AddTaskModalProps) {
   const [title, setTitle] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [dueTime, setDueTime] = useState("");
+  const [location, setLocation] = useState("");
+  const [selectedCalendarId, setSelectedCalendarId] = useState("none");
   const [status, setStatus] = useState<PlannerTask["status"]>("open");
   const [priority, setPriority] = useState<PlannerTask["priority"]>("none");
   const [isPinned, setIsPinned] = useState(false);
@@ -1199,6 +1209,10 @@ function AddTaskModal({
       setTitle("");
       setDueDate(initialDueDate ?? "");
       setDueTime(initialDueTime ?? "");
+      setLocation("");
+      const defaultCal = preferences.googleCalendarSync?.defaultCalendarId;
+      const syncEnabled = preferences.googleCalendarSync?.enabled;
+      setSelectedCalendarId(syncEnabled && defaultCal ? defaultCal : "none");
       setStatus(initialStatus ?? "open");
       setPriority(preferences.defaultPriority ?? "none");
       setIsPinned(false);
@@ -1228,7 +1242,7 @@ function AddTaskModal({
         clearTimeout(timer);
       };
     }
-  }, [isOpen, initialDueDate, initialDueTime, initialStatus, preferences.defaultPriority]);
+  }, [isOpen, initialDueDate, initialDueTime, initialStatus, preferences.defaultPriority, preferences.googleCalendarSync?.defaultCalendarId, preferences.googleCalendarSync?.enabled]);
 
   // Close emoji picker on click outside
   useEffect(() => {
@@ -1282,6 +1296,8 @@ function AddTaskModal({
         timingPreference,
         labelIds: selectedLabelIds,
         notes: notes.trim(),
+        location: location.trim() || undefined,
+        googleCalendarId: selectedCalendarId !== "none" ? selectedCalendarId : undefined,
       });
       if (success) {
         onClose();
@@ -1597,6 +1613,46 @@ function AddTaskModal({
             </label>
           </div>
 
+          {/* 9. Location */}
+          <div style={{ marginBottom: "10px" }}>
+            <label className="add-task-field-label">
+              <span className="add-task-field-title">Location (optional)</span>
+              <input
+                type="text"
+                className="add-task-notes-textarea"
+                style={{ minHeight: "36px", padding: "6px 10px", resize: "none" }}
+                placeholder="Meeting location, video link, or room…"
+                maxLength={300}
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                disabled={isSaving}
+              />
+            </label>
+          </div>
+
+          {/* 10. Calendar Destination (Google Calendar Two-Way Sync) */}
+          {writableCalendars && writableCalendars.length > 0 && (
+            <div style={{ marginBottom: "14px" }}>
+              <label className="add-task-field-label">
+                <span className="add-task-field-title">Calendar Destination</span>
+                <select
+                  className="add-task-native-select"
+                  value={selectedCalendarId}
+                  onChange={(e) => setSelectedCalendarId(e.target.value)}
+                  disabled={isSaving}
+                  style={{ width: "100%", padding: "6px 10px", fontSize: "12.5px" }}
+                >
+                  <option value="none">Planorama (Local Only)</option>
+                  {writableCalendars.map((cal) => (
+                    <option key={cal.id} value={cal.id}>
+                      📅 {cal.name} {cal.accountEmail ? `(${cal.accountEmail})` : ""} {cal.primary ? "· Primary" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
+
           {/* Error alert if saving fails */}
           {error && (
             <div className="add-task-error-alert" role="alert">
@@ -1676,6 +1732,7 @@ export default function HomePage() {
   const [newProjectId, setNewProjectId] = useState("");
   const [editProjectId, setEditProjectId] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
+  const [calendarFilter, setCalendarFilter] = useState("");
   const [preferencesModalOpen, setPreferencesModalOpen] = useState(false);
 
   // Year view state
@@ -1738,6 +1795,7 @@ export default function HomePage() {
 
   // Task detail modal state
   const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
+  const [editLocation, setEditLocation] = useState("");
 
   // Kanban drag state
   const [dragTaskId, setDragTaskId] = useState<string | null>(null);
@@ -1773,21 +1831,54 @@ export default function HomePage() {
 
   const todayKey = toDateKey(today);
 
+  // Google Calendar integration helpers
+  const activeCalendarConfigs = useMemo(() => {
+    return preferences.googleCalendarSync?.calendarConfigs || {};
+  }, [preferences.googleCalendarSync?.calendarConfigs]);
+
+  const connectedCalendars = useMemo(() => {
+    return Object.values(activeCalendarConfigs).filter((cal) => cal.enabled);
+  }, [activeCalendarConfigs]);
+
+  const writableCalendars = useMemo(() => {
+    return Object.values(activeCalendarConfigs).filter(
+      (cal) => cal.enabled && cal.accessRole !== "reader" && cal.accessRole !== "freeBusyReader"
+    );
+  }, [activeCalendarConfigs]);
+
+  // Filter tasks based on disabled calendars and user's calendar/client selection
+  const displayedTasks = useMemo(() => {
+    return tasks.filter((task) => {
+      // 1. Exclude events belonging to calendars that were toggled off in settings
+      if (task.googleCalendarId && activeCalendarConfigs[task.googleCalendarId]?.enabled === false) {
+        return false;
+      }
+      // 2. Filter by user's calendar selection dropdown
+      if (calendarFilter === "__local") {
+        return !task.isGoogleEvent && !task.googleCalendarId;
+      }
+      if (calendarFilter && task.googleCalendarId !== calendarFilter) {
+        return false;
+      }
+      return true;
+    });
+  }, [tasks, activeCalendarConfigs, calendarFilter]);
+
   // Tasks grouped for the weekly kanban board
   const weekDateKeys = useMemo(() => new Set(weekDays.map(toDateKey)), [weekDays]);
   const weekTasksByStatus = useMemo(() => {
     const map: Record<PlannerTask["status"], PlannerTask[]> = { open: [], in_progress: [], completed: [] };
-    for (const task of tasks) {
+    for (const task of displayedTasks) {
       if (task.dueDate && weekDateKeys.has(task.dueDate)) {
         if (map[task.status]) map[task.status].push(task);
         else map.open.push(task);
       }
     }
     return map;
-  }, [tasks, weekDateKeys]);
+  }, [displayedTasks, weekDateKeys]);
 
-  const completed = tasks.filter((task) => task.status === "completed").length;
-  const visibleTasks = tasks.filter((task) => {
+  const completed = displayedTasks.filter((task) => task.status === "completed").length;
+  const visibleTasks = displayedTasks.filter((task) => {
     const matchesDate = !selectedDate || task.dueDate === selectedDate;
     const matchesStatus = taskFilter === "all" || task.status === taskFilter;
     const matchesLabel = !labelFilter || (task.labelIds ?? []).includes(labelFilter);
@@ -1945,9 +2036,11 @@ export default function HomePage() {
     const gcalError = params.get("gcal_error");
 
     if (gcalStatus === "connected") {
-      showToast("Google Calendar connected successfully!");
+      const gcalAccount = params.get("gcal_account");
+      showToast(gcalAccount ? `Google account "${gcalAccount}" connected!` : "Google Calendar connected successfully!");
       const url = new URL(window.location.href);
       url.searchParams.delete("gcal_status");
+      url.searchParams.delete("gcal_account");
       window.history.replaceState({}, "", url.pathname + url.search);
       // Automatically trigger initial synchronization
       void handleSyncGoogle();
@@ -1958,6 +2051,28 @@ export default function HomePage() {
       window.history.replaceState({}, "", url.pathname + url.search);
     }
   }, [handleSyncGoogle, showToast]);
+
+  // Listen for online recovery to sync queued changes
+  useEffect(() => {
+    function handleOnline() {
+      if (preferences.googleCalendarSync?.enabled) {
+        void handleSyncGoogle();
+      }
+    }
+    window.addEventListener("online", handleOnline);
+    return () => window.removeEventListener("online", handleOnline);
+  }, [handleSyncGoogle, preferences.googleCalendarSync?.enabled]);
+
+  // Periodic background sync every 10 minutes if enabled and window is focused
+  useEffect(() => {
+    if (!preferences.googleCalendarSync?.enabled) return;
+    const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        void handleSyncGoogle();
+      }
+    }, 10 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [handleSyncGoogle, preferences.googleCalendarSync?.enabled]);
 
   function saveAsTemplate(task: PlannerTask) {
     const name = window.prompt("Name this template", task.title);
@@ -2291,7 +2406,12 @@ export default function HomePage() {
     timingPreference: "scheduled" | "whenever";
     labelIds: string[];
     notes: string;
+    location?: string;
+    googleCalendarId?: string;
   }): Promise<boolean> => {
+    const targetCalendar = taskData.googleCalendarId
+      ? preferences.googleCalendarSync?.calendarConfigs[taskData.googleCalendarId]
+      : undefined;
     const task = await createTask({
       title: taskData.title,
       dueDate: taskData.dueDate,
@@ -2303,8 +2423,19 @@ export default function HomePage() {
       timingPreference: taskData.timingPreference,
       labelIds: taskData.labelIds,
       notes: taskData.notes,
+      location: taskData.location?.trim() || undefined,
+      googleCalendarId: taskData.googleCalendarId,
+      googleCalendarName: targetCalendar?.name,
+      googleCalendarColor: targetCalendar?.color,
+      googleAccountId: targetCalendar?.accountId,
+      googleAccountEmail: targetCalendar?.accountEmail,
+      source: taskData.googleCalendarId ? "google" : "local",
+      syncStatus: taskData.googleCalendarId ? "pending" : undefined,
     });
     setTasks((current) => [...current, task]);
+    if (taskData.googleCalendarId && task.dueDate) {
+      void handleSyncGoogle();
+    }
     showToast("Task created!");
     return true;
   };
@@ -2475,6 +2606,7 @@ export default function HomePage() {
     setEditingId(task.id);
     setEditTitle(task.title);
     setEditNotes(task.notes);
+    setEditLocation(task.location ?? "");
     setEditDueDate(task.dueDate ?? "");
     setEditDueTime(task.dueTime ?? "");
     setEditPriority(task.priority ?? "none");
@@ -2503,6 +2635,7 @@ export default function HomePage() {
       ...task,
       title,
       notes: editNotes.trim(),
+      location: editLocation.trim() || undefined,
       dueDate: editDueDate || null,
       dueTime: editDueTime || null,
       priority: editPriority,
@@ -2513,6 +2646,7 @@ export default function HomePage() {
       labelIds: editLabelIds,
       projectId: editProjectId || null,
       status: editStatus,
+      syncStatus: (task.googleEventId && !task.isReadOnlyCalendar) ? "pending" : task.syncStatus,
     };
     if (updated.recurrence !== "none" && !updated.dueDate) { setSaveError("Choose a due date for a recurring task."); return; }
     try {
@@ -2522,6 +2656,18 @@ export default function HomePage() {
       setDetailTaskId(null);
       setSaveError("");
       showToast("Task updated!");
+
+      if (saved.googleEventId && !saved.isReadOnlyCalendar) {
+        enqueueSyncAction({
+          action: "update",
+          taskId: saved.id,
+          googleEventId: saved.googleEventId,
+          googleCalendarId: saved.googleCalendarId,
+          googleAccountId: saved.googleAccountId,
+          localUpdatedAt: new Date().toISOString(),
+        });
+        void handleSyncGoogle();
+      }
     } catch {
       setSaveError("Your edit could not be saved. Please try again.");
     }
@@ -2594,6 +2740,28 @@ export default function HomePage() {
       if (editingId === task.id) setEditingId(null);
       if (detailTaskId === task.id) setDetailTaskId(null);
       setSaveError("");
+
+      if (task.isReadOnlyCalendar) {
+        if (task.googleEventId) {
+          recordDeletedGoogleEventId(task.googleEventId);
+        }
+      } else if (task.isGoogleEvent || task.googleEventId) {
+        const deleteOnGoogle = preferences.googleCalendarSync?.deleteGoogleEventOnTaskDelete;
+        if (task.googleEventId) {
+          recordDeletedGoogleEventId(task.googleEventId);
+        }
+        if (deleteOnGoogle && task.googleEventId && task.googleCalendarId) {
+          enqueueSyncAction({
+            action: "delete",
+            taskId: task.id,
+            googleEventId: task.googleEventId,
+            googleCalendarId: task.googleCalendarId,
+            googleAccountId: task.googleAccountId,
+            localUpdatedAt: new Date().toISOString(),
+          });
+          void handleSyncGoogle();
+        }
+      }
     } catch {
       setSaveError("This task could not be deleted. Please try again.");
     }
@@ -2607,12 +2775,12 @@ export default function HomePage() {
   ];
   const tasksByStatus = useMemo(() => {
     const map: Record<PlannerTask["status"], PlannerTask[]> = { open: [], in_progress: [], completed: [] };
-    for (const task of tasks) {
+    for (const task of displayedTasks) {
       if (map[task.status]) map[task.status].push(task);
       else map.open.push(task); // fallback
     }
     return map;
-  }, [tasks]);
+  }, [displayedTasks]);
 
   // Detail task lookup
   const detailTask = detailTaskId ? tasks.find((t) => t.id === detailTaskId) : null;
@@ -2620,18 +2788,18 @@ export default function HomePage() {
   // Memoized tasks by due date for O(1) annual grid lookups
   const tasksByDueDate = useMemo(() => {
     const map: Record<string, PlannerTask[]> = {};
-    for (const t of tasks) {
+    for (const t of displayedTasks) {
       if (t.dueDate) {
         if (!map[t.dueDate]) map[t.dueDate] = [];
         map[t.dueDate].push(t);
       }
     }
     return map;
-  }, [tasks]);
+  }, [displayedTasks]);
 
   const renderYearlineView = () => {
-    const yearTasksCount = tasks.filter((t) => t.dueDate?.startsWith(`${shownYear}-`)).length;
-    const yearCompletedCount = tasks.filter((t) => t.dueDate?.startsWith(`${shownYear}-`) && t.status === "completed").length;
+    const yearTasksCount = displayedTasks.filter((t) => t.dueDate?.startsWith(`${shownYear}-`)).length;
+    const yearCompletedCount = displayedTasks.filter((t) => t.dueDate?.startsWith(`${shownYear}-`) && t.status === "completed").length;
 
     return (
       <section className="yearline-unified-card neo-card" id="yearline-view">
@@ -2718,7 +2886,7 @@ export default function HomePage() {
               const color = getMonthColor(resolvedTheme, mIdx);
               const isTileMode = resolvedTheme.mode === "tiles";
               const maxDays = daysInMonth(shownYear, mIdx);
-              const monthTasks = tasks.filter((t) => t.dueDate?.startsWith(`${shownYear}-${String(mIdx + 1).padStart(2, "0")}-`));
+              const monthTasks = displayedTasks.filter((t) => t.dueDate?.startsWith(`${shownYear}-${String(mIdx + 1).padStart(2, "0")}-`));
               const monthTasksCount = monthTasks.length;
               const activeDaysCount = new Set(monthTasks.map((t) => t.dueDate)).size;
               const isBusyMonth = monthTasksCount >= 8;
@@ -3013,7 +3181,7 @@ export default function HomePage() {
 
   const renderSelectedDateBanner = () => {
     if (!selectedDate) return null;
-    const selectedDateTasks = tasks.filter((t) => t.dueDate === selectedDate);
+    const selectedDateTasks = displayedTasks.filter((t) => t.dueDate === selectedDate);
     return (
       <div className="selected-date-banner neo-card">
         <div className="selected-date-banner-main">
@@ -3144,7 +3312,7 @@ export default function HomePage() {
               : (weekDateKeys.has(todayKey) ? todayKey : toDateKey(weekDays[0]));
             const activeWeekDate = weekDays.find((d) => toDateKey(d) === activeWeekDateKey) ?? weekDays[0];
             const activeDayIndex = Math.max(0, weekDays.findIndex((d) => toDateKey(d) === activeWeekDateKey));
-            const activeDayTasks = tasks.filter((t) => t.dueDate === activeWeekDateKey).sort((a, b) => (a.dueTime ?? "99:99").localeCompare(b.dueTime ?? "99:99"));
+            const activeDayTasks = displayedTasks.filter((t) => t.dueDate === activeWeekDateKey).sort((a, b) => (a.dueTime ?? "99:99").localeCompare(b.dueTime ?? "99:99"));
 
             return (
               <div className="week-mobile-day-view">
@@ -3154,7 +3322,7 @@ export default function HomePage() {
                     const dKey = toDateKey(day);
                     const isAct = dKey === activeWeekDateKey;
                     const isTod = dKey === todayKey;
-                    const dayCount = tasks.filter((t) => t.dueDate === dKey).length;
+                    const dayCount = displayedTasks.filter((t) => t.dueDate === dKey).length;
                     return (
                       <button
                         key={dKey}
@@ -3313,7 +3481,7 @@ export default function HomePage() {
             const dateKey = toDateKey(day);
             const isToday = dateKey === todayKey;
             const isSelected = dateKey === selectedDate;
-            const dayTasks = tasks.filter((t) => t.dueDate === dateKey).sort((a, b) => (a.dueTime ?? "99:99").localeCompare(b.dueTime ?? "99:99"));
+            const dayTasks = displayedTasks.filter((t) => t.dueDate === dateKey).sort((a, b) => (a.dueTime ?? "99:99").localeCompare(b.dueTime ?? "99:99"));
             return (
               <div
                 className={`week-day-col ${isToday ? "week-today" : ""} ${isSelected ? "week-selected-day" : ""}`}
@@ -3799,7 +3967,7 @@ export default function HomePage() {
                           const isWeekend = dayDate.getDay() === 0 || dayDate.getDay() === 6;
                           const isToday = dateKey === todayKey;
                           const isSelected = dateKey === selectedDate;
-                          const dueTasks = tasks.filter((t) => t.dueDate === dateKey);
+                          const dueTasks = displayedTasks.filter((t) => t.dueDate === dateKey);
                           const hasTasks = dueTasks.length > 0;
                           const openCount = dueTasks.filter((t) => t.status !== "completed").length;
 
@@ -4052,7 +4220,7 @@ export default function HomePage() {
                 {calendarDays.map((day, index) => {
                   const isToday = day === today.getDate() && shownDate.getMonth() === today.getMonth() && shownDate.getFullYear() === today.getFullYear();
                   const dateKey = day ? formatDateKey(day) : "";
-                  const dueTasks = day ? tasks.filter((task) => task.dueDate === dateKey) : [];
+                  const dueTasks = day ? displayedTasks.filter((task) => task.dueDate === dateKey) : [];
                   const taskCount = dueTasks.length;
                   const openCount = dueTasks.filter((task) => task.status !== "completed").length;
                   const isSelected = Boolean(day && selectedDate === dateKey);
@@ -4152,7 +4320,7 @@ export default function HomePage() {
               </div>
             ) : (
               <div className="agenda-list">
-                {tasks.filter((task) => task.dueDate).slice().sort((a, b) => {
+                {displayedTasks.filter((task) => task.dueDate).slice().sort((a, b) => {
                   const aPinned = a.isPinned ? 1 : 0;
                   const bPinned = b.isPinned ? 1 : 0;
                   if (aPinned !== bPinned) return bPinned - aPinned;
@@ -4289,6 +4457,7 @@ export default function HomePage() {
                     <option value="daily">Daily</option>
                     <option value="weekly">Weekly</option>
                     <option value="monthly">Monthly</option>
+                    <option value="yearly">Yearly</option>
                   </select>
                 </label>
                 <TaskPriorityOrgControl
@@ -4306,6 +4475,19 @@ export default function HomePage() {
             </form>
             {saveError && <p className="save-error" role="status">{saveError}</p>}
             <div className="task-tools">
+              {connectedCalendars.length > 0 && (
+                <label className="task-calendar-filter">Calendar
+                  <select aria-label="Filter by calendar" value={calendarFilter} onChange={(event) => setCalendarFilter(event.target.value)}>
+                    <option value="">All calendars</option>
+                    <option value="__local">Planorama only</option>
+                    {connectedCalendars.map((cal) => (
+                      <option key={cal.id} value={cal.id}>
+                        {cal.accountEmail ? `${cal.name} (${cal.accountEmail})` : cal.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <label className="task-label-filter">Label
                 <select aria-label="Filter by label" value={labelFilter} onChange={(event) => setLabelFilter(event.target.value)}>
                   <option value="">All labels</option>
@@ -4363,12 +4545,14 @@ export default function HomePage() {
                   <div className="task-edit-fields">
                     <label>Due date<input type="date" value={editDueDate} onChange={(event) => setEditDueDate(event.target.value)} /></label>
                     <label>Due time<input type="time" value={editDueTime} onChange={(event) => setEditDueTime(event.target.value)} /></label>
+                    <label>Location (optional)<input maxLength={200} value={editLocation} onChange={(event) => setEditLocation(event.target.value)} placeholder="Physical address, room, or meeting link" /></label>
                     <label>Repeat
                       <select value={editRecurrence} onChange={(event) => setEditRecurrence(event.target.value as PlannerTask["recurrence"])}>
                         <option value="none">Does not repeat</option>
                         <option value="daily">Daily</option>
                         <option value="weekly">Weekly</option>
                         <option value="monthly">Monthly</option>
+                        <option value="yearly">Yearly</option>
                       </select>
                     </label>
                     <label>Status
@@ -4422,11 +4606,26 @@ export default function HomePage() {
                         {task.isReadOnlyCalendar && " 🔒"}
                       </span>
                     )}
+                    {task.syncStatus === "pending" && (
+                      <span className="badge-chip" style={{ background: "#fef3c7", color: "#b45309", fontSize: "10.5px" }} title="Pending sync with Google Calendar">
+                        ⏳ Syncing
+                      </span>
+                    )}
+                    {task.syncStatus === "conflict" && (
+                      <span className="badge-chip" style={{ background: "#fee2e2", color: "#b91c1c", fontSize: "10.5px" }} title="Conflict detected with Google Calendar">
+                        ⚠️ Conflict
+                      </span>
+                    )}
                     {task.labelIds?.length > 0 && <span className="task-labels">{task.labelIds.map((id) => <small className="task-label-chip" key={id}>{labels.find((label) => label.id === id)?.name ?? id}</small>)}</span>}
                     <div className="task-row-tags">
                       {task.isPersonal && <span className="badge-chip badge-personal" title="Personal: Optional category for life tasks">🌿 Personal</span>}
                       {task.timingPreference === "whenever" && <span className="badge-chip badge-whenever" title="Whenever: No specific deadline">🟢 Whenever</span>}
                     </div>
+                    {task.location && (
+                      <small style={{ color: "#475569", display: "inline-flex", alignItems: "center", gap: "3px" }}>
+                        📍 {task.location}
+                      </small>
+                    )}
                     {task.notes && <small className="task-notes-preview">{task.notes}</small>}
                     {task.dueDate && <small className={"task-due-date " + (isOverdue(task) ? "overdue" : "")}>{isOverdue(task) ? "Overdue · " : ""}{new Date(task.dueDate + "T12:00:00").toLocaleDateString("en", { month: "short", day: "numeric" })}{task.dueTime ? ` · ${new Date(`2000-01-01T${task.dueTime}`).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}` : ""}</small>}
                   </span>
@@ -4457,6 +4656,7 @@ export default function HomePage() {
         labels={labels}
         onAddLabel={addLabel}
         onSaveTask={handleSaveNewTask}
+        writableCalendars={writableCalendars}
       />
 
       {/* ===== TASK DETAIL MODAL ===== */}
@@ -4511,6 +4711,21 @@ export default function HomePage() {
                       </a>
                     )}
                   </div>
+                  {detailTask.googleAccountEmail && (
+                    <div style={{ fontSize: "11.5px", color: "#475569" }}>
+                      <strong>Account:</strong> {detailTask.googleAccountEmail}
+                    </div>
+                  )}
+                  {detailTask.location && (
+                    <div style={{ fontSize: "11.5px", color: "#475569", display: "flex", alignItems: "center", gap: "4px" }}>
+                      <span>📍</span> {detailTask.location}
+                    </div>
+                  )}
+                  {detailTask.attendees && detailTask.attendees.length > 0 && (
+                    <div style={{ fontSize: "11.5px", color: "#475569" }}>
+                      <strong>Attendees:</strong> {detailTask.attendees.map((a) => a.displayName || a.email).join(", ")}
+                    </div>
+                  )}
                   {detailTask.isReadOnlyCalendar && (
                     <p style={{ margin: "4px 0 0", fontSize: "11.5px", color: "#64748b", lineHeight: 1.4 }}>
                       This client calendar was shared with view-only permissions. Edits saved here update your Planorama view, but will not overwrite your client&apos;s Google Calendar.
@@ -4524,6 +4739,9 @@ export default function HomePage() {
               <label className="detail-label">Notes
                 <textarea maxLength={2000} rows={3} value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="Add details or a reminder…" />
               </label>
+              <label className="detail-label">Location
+                <input maxLength={200} value={editLocation} onChange={(e) => setEditLocation(e.target.value)} placeholder="Physical address, room, or meeting link" />
+              </label>
               <div className="detail-grid">
                 <label className="detail-label">Due date <input type="date" value={editDueDate} onChange={(e) => setEditDueDate(e.target.value)} /></label>
                 <label className="detail-label">Start time <input type="time" value={editDueTime} onChange={(e) => setEditDueTime(e.target.value)} /></label>
@@ -4534,7 +4752,7 @@ export default function HomePage() {
                 </label>
                 <label className="detail-label">Repeat
                   <select value={editRecurrence} onChange={(e) => setEditRecurrence(e.target.value as PlannerTask["recurrence"])}>
-                    <option value="none">Does not repeat</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option>
+                    <option value="none">Does not repeat</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option>
                   </select>
                 </label>
                 <label className="detail-label">Project

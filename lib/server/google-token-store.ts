@@ -4,6 +4,7 @@ import { encryptText, decryptText, type EncryptedPayload } from "./crypto";
 
 export interface StoredGoogleCredentials {
   sessionId: string;
+  accountId?: string;
   userEmail?: string;
   userName?: string;
   userPicture?: string;
@@ -13,6 +14,27 @@ export interface StoredGoogleCredentials {
   scope: string;
   connectedAt: string;
   updatedAt: string;
+  isPrimary?: boolean;
+}
+
+export interface StoredGoogleAccount {
+  accountId: string;
+  userEmail: string;
+  userName?: string;
+  userPicture?: string;
+  accessToken: string;
+  refreshToken?: string;
+  expiresAt: number;
+  scope: string;
+  connectedAt: string;
+  updatedAt: string;
+  isPrimary?: boolean;
+}
+
+export interface StoredSessionGoogleData {
+  sessionId: string;
+  accounts: Record<string, StoredGoogleAccount>;
+  primaryAccountId?: string;
 }
 
 export interface StoredCalendarSyncMeta {
@@ -48,32 +70,56 @@ function getMetaFilePath(sessionId: string): string {
 }
 
 /**
- * Encrypt and store Google credentials at rest for a user session.
+ * Normalizes raw decrypted JSON to StoredSessionGoogleData, handling legacy single-account payload.
  */
-export async function saveEncryptedCredentials(
-  sessionId: string,
-  credentials: StoredGoogleCredentials
-): Promise<void> {
-  const payload = encryptText(JSON.stringify(credentials));
-  memoryTokenCache.set(sessionId, payload);
-
-  try {
-    await ensureStorageDir();
-    const filePath = getFilePath(sessionId);
-    await fs.writeFile(filePath, JSON.stringify(payload), "utf8");
-  } catch (err) {
-    // Continue with in-memory cache if filesystem write fails
-    console.warn("[GoogleTokenStore] Failed to write token file to disk, relying on memory cache:", err);
+function normalizeSessionData(sessionId: string, rawData: unknown): StoredSessionGoogleData {
+  if (!rawData || typeof rawData !== "object") {
+    return { sessionId, accounts: {} };
   }
+
+  const obj = rawData as Record<string, unknown>;
+
+  // Check if it already matches multi-account format
+  if (obj.accounts && typeof obj.accounts === "object") {
+    return {
+      sessionId,
+      accounts: obj.accounts as Record<string, StoredGoogleAccount>,
+      primaryAccountId: (obj.primaryAccountId as string) || Object.keys(obj.accounts as object)[0],
+    };
+  }
+
+  // Legacy single-account format: top-level accessToken
+  if (typeof obj.accessToken === "string") {
+    const creds = obj as unknown as StoredGoogleCredentials;
+    const accountId = creds.accountId || creds.userEmail || "primary";
+    const account: StoredGoogleAccount = {
+      accountId,
+      userEmail: creds.userEmail || "primary@google.com",
+      userName: creds.userName,
+      userPicture: creds.userPicture,
+      accessToken: creds.accessToken,
+      refreshToken: creds.refreshToken,
+      expiresAt: creds.expiresAt,
+      scope: creds.scope,
+      connectedAt: creds.connectedAt,
+      updatedAt: creds.updatedAt,
+      isPrimary: true,
+    };
+
+    return {
+      sessionId,
+      accounts: { [accountId]: account },
+      primaryAccountId: accountId,
+    };
+  }
+
+  return { sessionId, accounts: {} };
 }
 
 /**
- * Retrieve and decrypt stored Google credentials for a user session.
- * Returns null if not found or if decryption fails.
+ * Retrieve raw decrypted session data.
  */
-export async function getDecryptedCredentials(
-  sessionId: string
-): Promise<StoredGoogleCredentials | null> {
+async function loadRawSessionData(sessionId: string): Promise<StoredSessionGoogleData> {
   let payload: EncryptedPayload | null = memoryTokenCache.get(sessionId) || null;
 
   if (!payload) {
@@ -83,23 +129,150 @@ export async function getDecryptedCredentials(
       payload = JSON.parse(raw) as EncryptedPayload;
       memoryTokenCache.set(sessionId, payload);
     } catch {
-      return null;
+      return { sessionId, accounts: {} };
     }
   }
 
   try {
     const decryptedJson = decryptText(payload);
-    return JSON.parse(decryptedJson) as StoredGoogleCredentials;
+    const parsed = JSON.parse(decryptedJson);
+    return normalizeSessionData(sessionId, parsed);
   } catch (err) {
     console.error("[GoogleTokenStore] Failed to decrypt stored credentials for session:", err);
-    return null;
+    return { sessionId, accounts: {} };
   }
 }
 
 /**
- * Delete stored credentials for a session (used on disconnect or token revocation).
+ * Persist encrypted session data to memory and disk.
  */
-export async function deleteCredentials(sessionId: string): Promise<void> {
+async function writeSessionData(sessionId: string, data: StoredSessionGoogleData): Promise<void> {
+  const payload = encryptText(JSON.stringify(data));
+  memoryTokenCache.set(sessionId, payload);
+
+  try {
+    await ensureStorageDir();
+    const filePath = getFilePath(sessionId);
+    await fs.writeFile(filePath, JSON.stringify(payload), "utf8");
+  } catch (err) {
+    console.warn("[GoogleTokenStore] Failed to write token file to disk, relying on memory cache:", err);
+  }
+}
+
+/**
+ * Encrypt and store Google credentials at rest for a user session (supports multi-account).
+ */
+export async function saveEncryptedCredentials(
+  sessionId: string,
+  credentials: StoredGoogleCredentials,
+  targetAccountId?: string
+): Promise<void> {
+  const current = await loadRawSessionData(sessionId);
+  const accountId = targetAccountId || credentials.accountId || credentials.userEmail || "primary";
+
+  const isFirstAccount = Object.keys(current.accounts).length === 0;
+  const isPrimary = credentials.isPrimary ?? (isFirstAccount || current.primaryAccountId === accountId);
+
+  const account: StoredGoogleAccount = {
+    accountId,
+    userEmail: credentials.userEmail || accountId,
+    userName: credentials.userName,
+    userPicture: credentials.userPicture,
+    accessToken: credentials.accessToken,
+    refreshToken: credentials.refreshToken,
+    expiresAt: credentials.expiresAt,
+    scope: credentials.scope,
+    connectedAt: credentials.connectedAt,
+    updatedAt: credentials.updatedAt,
+    isPrimary,
+  };
+
+  current.accounts[accountId] = account;
+  if (isPrimary || !current.primaryAccountId) {
+    current.primaryAccountId = accountId;
+  }
+
+  await writeSessionData(sessionId, current);
+}
+
+/**
+ * Retrieve and decrypt stored Google credentials for a user session.
+ * If accountId is provided, returns that specific account.
+ * Otherwise returns the primary account.
+ */
+export async function getDecryptedCredentials(
+  sessionId: string,
+  accountId?: string
+): Promise<StoredGoogleCredentials | null> {
+  const data = await loadRawSessionData(sessionId);
+  const accountKeys = Object.keys(data.accounts);
+  if (accountKeys.length === 0) return null;
+
+  let target: StoredGoogleAccount | undefined;
+  if (accountId && data.accounts[accountId]) {
+    target = data.accounts[accountId];
+  } else if (data.primaryAccountId && data.accounts[data.primaryAccountId]) {
+    target = data.accounts[data.primaryAccountId];
+  } else {
+    target = data.accounts[accountKeys[0]];
+  }
+
+  if (!target) return null;
+
+  return {
+    sessionId,
+    accountId: target.accountId,
+    userEmail: target.userEmail,
+    userName: target.userName,
+    userPicture: target.userPicture,
+    accessToken: target.accessToken,
+    refreshToken: target.refreshToken,
+    expiresAt: target.expiresAt,
+    scope: target.scope,
+    connectedAt: target.connectedAt,
+    updatedAt: target.updatedAt,
+    isPrimary: target.isPrimary,
+  };
+}
+
+/**
+ * Retrieve all connected Google accounts for a session.
+ */
+export async function getAllConnectedAccounts(
+  sessionId: string
+): Promise<StoredGoogleAccount[]> {
+  const data = await loadRawSessionData(sessionId);
+  return Object.values(data.accounts);
+}
+
+/**
+ * Delete stored credentials for a session or for a specific account.
+ */
+export async function deleteCredentials(
+  sessionId: string,
+  accountId?: string
+): Promise<void> {
+  if (accountId) {
+    const data = await loadRawSessionData(sessionId);
+    if (data.accounts[accountId]) {
+      delete data.accounts[accountId];
+      // If deleted account was primary, reassign primary to another account
+      if (data.primaryAccountId === accountId) {
+        const remainingKeys = Object.keys(data.accounts);
+        data.primaryAccountId = remainingKeys.length > 0 ? remainingKeys[0] : undefined;
+        if (data.primaryAccountId && data.accounts[data.primaryAccountId]) {
+          data.accounts[data.primaryAccountId].isPrimary = true;
+        }
+      }
+
+      if (Object.keys(data.accounts).length > 0) {
+        await writeSessionData(sessionId, data);
+        return;
+      }
+    }
+  }
+
+  // Wiping all credentials for this session
   memoryTokenCache.delete(sessionId);
   memorySyncMetaCache.delete(sessionId);
 

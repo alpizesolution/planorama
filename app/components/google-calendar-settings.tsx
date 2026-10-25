@@ -10,7 +10,9 @@ import {
   Lock,
   Plugs,
   PlugsConnected,
+  Plus,
   ShieldCheck,
+  User,
   WarningCircle,
 } from "@phosphor-icons/react";
 import type { PlannerPreferences } from "@/lib/schedule/types";
@@ -93,6 +95,8 @@ export function GoogleCalendarSettings({
                 name: cal.name,
                 accessRole: cal.accessRole,
                 primary: cal.primary,
+                accountId: cal.accountId,
+                accountEmail: cal.accountEmail,
               };
             }
           }
@@ -124,32 +128,51 @@ export function GoogleCalendarSettings({
   }, [loadStatus]);
 
   function handleConnect() {
-    // Initiate OAuth flow
+    // Initiate OAuth flow with account selection
     window.location.href = "/api/auth/google";
   }
 
-  async function handleDisconnect() {
-    if (
-      !window.confirm(
-        "Are you sure you want to disconnect Google Calendar? This will stop synchronization and revoke stored tokens. Existing imported tasks in Planorama will be preserved."
-      )
-    ) {
+  async function handleDisconnectAccount(accountId?: string, email?: string) {
+    const isMultiple = (status?.accounts?.length ?? 0) > 1;
+    const confirmMsg = email && isMultiple
+      ? `Disconnect Google account "${email}"? This will stop synchronizing its calendars. Other connected accounts will remain active.`
+      : "Are you sure you want to disconnect Google Calendar? This will stop synchronization and revoke stored tokens. Existing imported tasks in Planorama will be preserved.";
+
+    if (!window.confirm(confirmMsg)) {
       return;
     }
 
     setIsDisconnecting(true);
     try {
-      await disconnectGoogleAccount();
-      setStatus({ connected: false, calendars: [] });
-      setCalendars([]);
-      onSavePreferences({
-        ...preferences,
-        googleCalendarSync: {
-          ...syncSettings,
-          enabled: false,
-        },
-      });
-      showToast("Google Calendar disconnected.");
+      await disconnectGoogleAccount(accountId);
+      await loadStatus();
+
+      // Clean up calendars belonging to this account from preferences
+      if (accountId) {
+        const remainingConfigs = { ...syncSettings.calendarConfigs };
+        for (const [id, cfg] of Object.entries(remainingConfigs)) {
+          if (cfg.accountId === accountId || cfg.accountEmail === email) {
+            delete remainingConfigs[id];
+          }
+        }
+        onSavePreferences({
+          ...preferences,
+          googleCalendarSync: {
+            ...syncSettings,
+            calendarConfigs: remainingConfigs,
+          },
+        });
+      } else {
+        onSavePreferences({
+          ...preferences,
+          googleCalendarSync: {
+            ...syncSettings,
+            enabled: false,
+          },
+        });
+      }
+
+      showToast(email && isMultiple ? `Account "${email}" disconnected.` : "Google Calendar disconnected.");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to disconnect.";
       onError(msg);
@@ -257,6 +280,16 @@ export function GoogleCalendarSettings({
     });
   }
 
+  function handleUpdateDefaultCalendar(calendarId: string) {
+    onSavePreferences({
+      ...preferences,
+      googleCalendarSync: {
+        ...syncSettings,
+        defaultCalendarId: calendarId === "none" ? undefined : calendarId,
+      },
+    });
+  }
+
   function handleToggleAutoSyncTasks() {
     onSavePreferences({
       ...preferences,
@@ -293,6 +326,10 @@ export function GoogleCalendarSettings({
     }
   };
 
+  const writableCalendars = calendars.filter(
+    (c) => c.accessRole !== "reader" && c.accessRole !== "freeBusyReader"
+  );
+
   return (
     <section className="preferences-section google-integration-section">
       <div className="preferences-section-kicker">
@@ -300,8 +337,8 @@ export function GoogleCalendarSettings({
         Integrations &rarr; Google Calendar
       </div>
       <p className="preferences-section-desc">
-        Connect your Google account to synchronize your personal schedule and authorized client calendars
-        alongside Planorama tasks.
+        Connect your Google account and authorized client calendars to synchronize appointments and meetings
+        seamlessly with Planorama tasks.
       </p>
 
       {isLoading ? (
@@ -336,7 +373,7 @@ export function GoogleCalendarSettings({
             </div>
             <div className="va-highlight-item">
               <CheckCircle size={18} weight="fill" color="#9333ea" />
-              <span><strong>Multi-Calendar Labeling:</strong> Assign custom pastel colors and labels to distinguish Client A, Client B, and Work.</span>
+              <span><strong>Multi-Account &amp; Client Delegation:</strong> Connect your personal account and separately authorized client accounts without mixing schedules.</span>
             </div>
           </div>
 
@@ -365,7 +402,7 @@ export function GoogleCalendarSettings({
                   d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
                 />
               </svg>
-              <span>Connect with Google Calendar</span>
+              <span>Connect Google Calendar</span>
             </button>
             <span className="google-oauth-note">
               OAuth 2.0 consent with least-privilege calendar scopes. Tokens encrypted at rest.
@@ -375,7 +412,7 @@ export function GoogleCalendarSettings({
       ) : (
         /* CONNECTED STATE */
         <div className="google-connected-dashboard">
-          {/* Account Status Card */}
+          {/* Top Banner & Global Sync Action */}
           <div className="google-account-banner">
             <div className="google-account-info">
               <div className="google-account-header-line">
@@ -383,7 +420,9 @@ export function GoogleCalendarSettings({
                   <Plugs size={14} weight="bold" /> Connected
                 </span>
                 <span className="google-user-email">
-                  {status.userEmail || "Google Account"}
+                  {status.accounts && status.accounts.length > 1
+                    ? `${status.accounts.length} Google Accounts Connected`
+                    : status.userEmail || "Google Account"}
                 </span>
               </div>
               <span className="google-sync-timestamp">
@@ -406,16 +445,6 @@ export function GoogleCalendarSettings({
                 />
                 <span>{isSyncing ? "Syncing..." : "Sync Now"}</span>
               </button>
-
-              <button
-                type="button"
-                className="google-disconnect-btn"
-                onClick={handleDisconnect}
-                disabled={isDisconnecting}
-                title="Disconnect Google account and revoke access tokens"
-              >
-                {isDisconnecting ? "Disconnecting..." : "Disconnect"}
-              </button>
             </div>
           </div>
 
@@ -425,6 +454,159 @@ export function GoogleCalendarSettings({
               <span>{status.lastSyncError}</span>
             </div>
           )}
+
+          {/* Connected Accounts Manager (Virtual Assistant Multi-Account Support) */}
+          <div className="google-accounts-manager-card" style={{
+            background: "#fffdfa",
+            border: "2px solid #1c1917",
+            borderRadius: "10px",
+            padding: "14px",
+            boxShadow: "3px 3px 0 #1c1917",
+            marginBottom: "16px",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px", flexWrap: "wrap", gap: "8px" }}>
+              <div>
+                <h5 style={{ margin: 0, fontSize: "13.5px", fontWeight: 800, color: "#1c1917" }}>
+                  Connected Accounts ({status.accounts?.length || 1})
+                </h5>
+                <span style={{ fontSize: "11.5px", color: "#78716c" }}>
+                  Virtual assistants can connect personal and client Google accounts separately.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleConnect}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "5px",
+                  padding: "5px 10px",
+                  background: "#fff",
+                  border: "1.5px solid #1c1917",
+                  borderRadius: "6px",
+                  fontSize: "12px",
+                  fontWeight: 700,
+                  boxShadow: "1.5px 1.5px 0 #1c1917",
+                  cursor: "pointer",
+                }}
+                title="Connect an authorized client or additional Google Calendar"
+              >
+                <Plus size={14} weight="bold" />
+                <span>Add Google Account</span>
+              </button>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              {(status.accounts && status.accounts.length > 0 ? status.accounts : [
+                { accountId: "primary", userEmail: status.userEmail || "Connected Account", isPrimary: true, connectedAt: status.connectedAt || "" }
+              ]).map((acc) => (
+                <div
+                  key={acc.accountId}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "8px 12px",
+                    background: "#fbf8f2",
+                    border: "1.5px solid #e7e0d3",
+                    borderRadius: "8px",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
+                    <div
+                      style={{
+                        width: "28px",
+                        height: "28px",
+                        borderRadius: "50%",
+                        background: acc.isPrimary ? "#ffd84d" : "#7cc4ff",
+                        border: "1.5px solid #1c1917",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: "12px",
+                        fontWeight: 800,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {acc.userName ? acc.userName[0].toUpperCase() : <User size={14} />}
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <span style={{ fontSize: "12.5px", fontWeight: 700, color: "#1c1917", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {acc.userEmail}
+                        </span>
+                        {acc.isPrimary ? (
+                          <span style={{ fontSize: "10px", background: "#fef08a", border: "1px solid #ca8a04", padding: "1px 6px", borderRadius: "999px", fontWeight: 800 }}>
+                            Primary
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: "10px", background: "#e0f2fe", border: "1px solid #0284c7", padding: "1px 6px", borderRadius: "999px", fontWeight: 800, color: "#0369a1" }}>
+                            Client Account
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleDisconnectAccount(acc.accountId, acc.userEmail)}
+                    disabled={isDisconnecting}
+                    style={{
+                      padding: "4px 8px",
+                      background: "#fee2e2",
+                      border: "1.5px solid #ef4444",
+                      borderRadius: "6px",
+                      fontSize: "11px",
+                      fontWeight: 700,
+                      color: "#991b1b",
+                      cursor: "pointer",
+                      flexShrink: 0,
+                    }}
+                    title={`Disconnect ${acc.userEmail}`}
+                  >
+                    Disconnect
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Default Calendar for Newly Created Events */}
+          <div style={{
+            background: "#fffdfa",
+            border: "2px solid #1c1917",
+            borderRadius: "10px",
+            padding: "12px 14px",
+            boxShadow: "3px 3px 0 #1c1917",
+            marginBottom: "16px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: "10px",
+          }}>
+            <div>
+              <strong style={{ fontSize: "12.5px", color: "#1c1917" }}>Default Calendar for New Events:</strong>
+              <div style={{ fontSize: "11.5px", color: "#78716c" }}>
+                Newly created tasks with Google sync enabled will be saved to this calendar by default.
+              </div>
+            </div>
+            <select
+              value={syncSettings.defaultCalendarId || "none"}
+              onChange={(e) => handleUpdateDefaultCalendar(e.target.value)}
+              className="google-select-sm"
+              style={{ padding: "6px 10px", fontSize: "12px", minWidth: "180px" }}
+              aria-label="Default calendar for new events"
+            >
+              <option value="none">Planorama (Local Only)</option>
+              {writableCalendars.map((cal) => (
+                <option key={cal.id} value={cal.id}>
+                  {cal.name} {cal.accountEmail ? `(${cal.accountEmail})` : ""} {cal.primary ? "· Primary" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
 
           {/* Calendars Configuration Table */}
           <div className="google-calendars-list-container">
@@ -475,7 +657,14 @@ export function GoogleCalendarSettings({
                             style={{ backgroundColor: activeColor }}
                             aria-hidden="true"
                           />
-                          <strong className="google-cal-name">{cal.name}</strong>
+                          <div style={{ display: "inline-flex", flexDirection: "column" }}>
+                            <strong className="google-cal-name">{cal.name}</strong>
+                            {cal.accountEmail && (
+                              <span style={{ fontSize: "10.5px", color: "#78716c", fontWeight: 500 }}>
+                                {cal.accountEmail}
+                              </span>
+                            )}
+                          </div>
                           {cal.primary && (
                             <span className="google-cal-primary-chip">Primary</span>
                           )}
@@ -584,7 +773,7 @@ export function GoogleCalendarSettings({
                 <strong>Automatically export eligible Planorama tasks</strong>
                 <span>
                   When enabled, tasks with scheduled due dates created in Planorama will be exported as events
-                  to your primary Google Calendar.
+                  to your default Google Calendar.
                 </span>
               </div>
             </label>

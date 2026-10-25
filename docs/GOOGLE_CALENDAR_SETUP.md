@@ -89,10 +89,21 @@ This guide provides step-by-step instructions to configure Google Cloud Platform
 
 ---
 
-## 6. Virtual Assistant Workflow: Sharing Client Calendars
+## 6. Virtual Assistant & Multi-Client Scheduling Workflows
 
-To manage client calendars without requiring clients to share sensitive passwords:
+Planorama supports two complementary patterns for Virtual Assistants managing multiple client calendars:
 
+### Pattern A: Multi-Account Direct Connection (Recommended for VAs with delegated Google accounts)
+1. In Planorama, open **Settings → Google Calendar Integration**.
+2. Click **Connect Google Calendar** to authorize your primary account.
+3. Under **Connected Google Accounts**, click **+ Add Another Google Account**.
+4. In the Google OAuth account picker, select or sign into the client's Google Account.
+5. Grant Calendar authorization.
+6. Planorama registers the account alongside your primary account with clear badge identifiers (e.g. `Primary` vs `Client Account`).
+7. All calendars across all connected accounts are aggregated with their respective account emails.
+8. Each client account can be disconnected independently without affecting other connected accounts.
+
+### Pattern B: Calendar Sharing / Delegation (Recommended when clients share specific calendars)
 1. **Client Shares Calendar with VA's Google Account**:
    - The client opens [Google Calendar](https://calendar.google.com/) on desktop.
    - In the left sidebar under "My calendars", the client hovers over the calendar they want to share and clicks the three vertical dots (⋮) → **Settings and sharing**.
@@ -104,18 +115,42 @@ To manage client calendars without requiring clients to share sensitive password
      - **Make changes to events**: For full two-way scheduling.
    - The client clicks **Send**.
 
-2. **Virtual Assistant Connects in Planorama**:
-   - The VA logs into Planorama and opens **Settings → Integrations → Google Calendar**.
-   - Clicks **Connect Google Calendar** and grants authorization.
-   - All shared client calendars automatically appear under **Select Calendars to Sync**.
-   - The VA can assign distinct colors (e.g. Blue for Personal, Pink for Client A, Emerald for Client B) and select whether to sync in two directions or view as read-only.
+2. **Virtual Assistant Manages in Planorama**:
+   - In Planorama **Settings → Google Calendar**, the shared calendar appears automatically.
+   - The VA can designate custom colors, toggle sync on/off, or designate a default calendar for new events.
+   - The VA can filter views by calendar using the **Calendar** filter dropdown in the toolbar to isolate a single client's events across the Yearline, Month, Week, and Kanban views.
 
 ---
 
-## 7. Security Best Practices
+## 7. Two-Way Sync, Queueing & Conflict Resolution
 
-- **Zero Client-Side Token Exposure**: Access tokens and refresh tokens are strictly handled server-side and never exposed to the browser.
-- **Encrypted at Rest**: Refresh tokens are stored encrypted using AES-256-GCM.
-- **CSRF Protection**: OAuth requests use HMAC-SHA256 signed `state` parameters bound to the user's authenticated session.
+Planorama implements an enterprise-grade synchronization engine:
+
+- **Two-Way Synchronization**:
+  - Creating, editing, or deleting an event in Planorama pushes changes to the designated Google Calendar.
+  - Changes made in Google Calendar (titles, notes, dates, start times, locations, attendees, and recurrence) sync down into Planorama.
+- **Durable Client Sync Queue**:
+  - Local edits and deletions are persisted to an offline-resilient sync queue (`planorama:sync_queue:v1`).
+  - Redundant actions coalesce automatically (e.g., creating and quickly deleting an event cancels before hitting Google API; multiple edits merge into a single update).
+  - Automatically drains when the browser comes online or upon manual refresh.
+- **Tombstones & Resurrection Prevention**:
+  - When an event is removed locally but deletion on Google is disabled, a tombstone records the unlinked Google Event ID.
+  - Subsequent incremental syncs will not re-import the deleted event.
+- **Safe Conflict Resolution**:
+  - If both Planorama and Google Calendar modify the same event between sync intervals, timestamps and pending queue states are compared.
+  - If the change is unambiguous, the newer change applies cleanly.
+  - If a genuine concurrent conflict occurs, the newer version is preserved and the task is tagged with a `⚠️ Conflict` indicator.
+- **Recurrence Support**:
+  - Supports Daily, Weekly, Monthly, and Yearly recurrence rules (RFC 5545 `RRULE`).
+- **Exponential Backoff**:
+  - API rate limits (HTTP 429) and server errors (HTTP 5xx) retry automatically with exponential backoff and jitter.
+
+---
+
+## 8. Security & Data Isolation
+
+- **Zero Client-Side Token Exposure**: Access tokens and refresh tokens are strictly handled server-side and never exposed to browser storage or JavaScript bundles.
+- **Encrypted at Rest**: Refresh tokens are stored encrypted using AES-256-GCM authenticated encryption.
+- **CSRF Protection**: OAuth requests use HMAC-SHA256 signed `state` parameters bound to the user's authenticated session with expiration timestamps.
 - **Read-Only Protection**: Planorama will never attempt write or delete operations on client calendars marked as read-only.
-- **Revocation on Disconnect**: Clicking **Disconnect** in Settings immediately revokes OAuth tokens with Google's API and deletes stored credentials.
+- **Selective Disconnect & Token Revocation**: Disconnecting an account immediately revokes OAuth tokens with Google's API and deletes stored credentials for that account.

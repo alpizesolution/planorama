@@ -11,14 +11,34 @@ Planorama is a personal planning app combining a colorful year/month/day calenda
 - Keep apptracker read-only; this repository is independent.
 - Build and validate on a feature branch before any production deployment.
 
-## Planned experience
+## Features
 
-- Year, month, and day calendar views.
-- Tasks, projects, labels, priorities, and recurring tasks.
-- Local-first guest mode and optional Firebase account sync.
-- Optional Google Calendar connection with explicit authorization.
-- Validated JSON backup and restore.
+- **Year, Month, Week & Day Views**: Colorful, neo-brutalist yearline, mini grids, weekly 7-day timeline, and Kanban status views.
+- **Tasks, Projects, Labels & Habits**: Full task lifecycle with priorities, pinned items, personal categories, time/date preferences, and recurrence (daily, weekly, monthly, yearly).
+- **Two-Way Google Calendar Synchronization**:
+  - Secure, server-side OAuth 2.0 with AES-256-GCM encrypted token storage.
+  - Multi-account connection for Virtual Assistants to manage both personal and authorized client calendars.
+  - Granular calendar selection, custom color preservation, and default calendar assignment for new events.
+  - Durable offline sync queue with automatic action coalescing and tombstone resurrection prevention.
+  - Timestamp and ETag conflict resolution engine with retry exponential backoff.
+- **Local-first guest mode** with optional Firebase synchronization and validated JSON backup/restore.
+
+## Documentation
+
+- [Google Calendar Integration & Virtual Assistant Setup Guide](docs/GOOGLE_CALENDAR_SETUP.md)
 
 ## Development
 
-Implementation details and setup instructions will be added as Phase 1 establishes the app scaffold.
+```bash
+# Run tests
+npm test
+
+# Typecheck
+npm run typecheck
+
+# Lint
+npm run lint
+
+# Build production bundle
+npm run build
+```

@@ -8,6 +8,17 @@ export interface GoogleCalendarConfig {
   enabled: boolean;
   syncDirection: "two_way" | "import_only" | "export_only";
   privacyMode: "full_details" | "availability_only";
+  accountId?: string;
+  accountEmail?: string;
+}
+
+export interface ConnectedGoogleAccount {
+  accountId: string;
+  userEmail: string;
+  userName?: string;
+  userPicture?: string;
+  isPrimary: boolean;
+  connectedAt: string;
 }
 
 export interface GoogleIntegrationStatus {
@@ -18,12 +29,14 @@ export interface GoogleIntegrationStatus {
   lastSyncStatus?: "idle" | "syncing" | "success" | "error";
   lastSyncError?: string;
   calendars: GoogleCalendarConfig[];
+  accounts?: ConnectedGoogleAccount[];
 }
 
 export interface GoogleCalendarSyncSettings {
   enabled: boolean;
   autoSyncTasks: boolean; // Auto-export eligible Planorama tasks to primary Google Calendar
   deleteGoogleEventOnTaskDelete: boolean; // Safety guard: prevent accidental deletion of client events
+  defaultCalendarId?: string; // Target calendar for new Google events
   calendarConfigs: Record<string, GoogleCalendarConfig>;
   lastSyncTime?: string;
   lastSyncStatus?: "idle" | "syncing" | "success" | "error";
@@ -42,6 +55,7 @@ export interface SyncResult {
   exportedCount: number;
   updatedCount: number;
   deletedCount: number;
+  conflictsResolved?: number;
   errors: string[];
   lastSyncTime: string;
 }

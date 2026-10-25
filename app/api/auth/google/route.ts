@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getOrCreateSessionId } from "@/lib/server/session";
-import { createSignedOAuthState, } from "@/lib/server/crypto";
+import { createSignedOAuthState } from "@/lib/server/crypto";
 import { buildGoogleAuthUrl } from "@/lib/server/google-calendar";
 
 export const dynamic = "force-dynamic";
@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/auth/google
  * Initiates the Google OAuth 2.0 authorization flow.
+ * Supports connecting primary and client accounts with account selection prompt.
  */
 export async function GET(request: Request) {
   try {
@@ -17,7 +18,7 @@ export async function GET(request: Request) {
 
     // Generate signed, tamper-proof state containing sessionId and returnUrl
     const state = createSignedOAuthState(sessionId, returnUrl);
-    const authUrl = buildGoogleAuthUrl(state);
+    const authUrl = buildGoogleAuthUrl(state, true);
 
     return NextResponse.redirect(authUrl);
   } catch (error) {

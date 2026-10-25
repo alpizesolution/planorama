@@ -5,8 +5,14 @@ import { DEFAULT_DASHBOARD_WIDGETS } from "../dashboard/types";
 
 export type Priority = "p1" | "p2" | "p3" | "p4" | "none";
 export type TaskStatus = "open" | "in_progress" | "completed";
-export type Recurrence = "none" | "daily" | "weekly" | "monthly";
+export type Recurrence = "none" | "daily" | "weekly" | "monthly" | "yearly";
 export type TimingPreference = "scheduled" | "whenever";
+
+export interface TaskAttendee {
+  email: string;
+  displayName?: string;
+  responseStatus?: string;
+}
 
 export type PlannerTask = {
   id: string;
@@ -33,6 +39,14 @@ export type PlannerTask = {
   isReadOnlyCalendar?: boolean;
   isPrivateAvailabilityOnly?: boolean;
   googleETag?: string;
+  source?: "local" | "google";
+  location?: string;
+  attendees?: TaskAttendee[];
+  googleAccountId?: string;
+  googleAccountEmail?: string;
+  lastSyncedAt?: string;
+  syncStatus?: "synced" | "pending" | "conflict" | "error";
+  recurringEventId?: string;
 };
 
 export type NewPlannerTask = Pick<PlannerTask, "title"> & Partial<Omit<PlannerTask, "id" | "title" | "createdAt" | "updatedAt">>;

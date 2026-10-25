@@ -2,7 +2,7 @@ import type { NewPlannerTask, PlannerTask } from "./types";
 
 const priorities = new Set(["p1", "p2", "p3", "p4", "none"]);
 const statuses = new Set(["open", "in_progress", "completed"]);
-const recurrences = new Set(["none", "daily", "weekly", "monthly"]);
+const recurrences = new Set(["none", "daily", "weekly", "monthly", "yearly"]);
 const timingPreferences = new Set(["scheduled", "whenever"]);
 
 export function validateTask(value: unknown): PlannerTask {
@@ -68,5 +68,13 @@ export function validateNewTask(value: NewPlannerTask): Omit<PlannerTask, "id" |
     isReadOnlyCalendar: value.isReadOnlyCalendar,
     isPrivateAvailabilityOnly: value.isPrivateAvailabilityOnly,
     googleETag: value.googleETag,
+    source: value.source ?? (value.isGoogleEvent ? "google" : "local"),
+    location: value.location,
+    attendees: value.attendees,
+    googleAccountId: value.googleAccountId,
+    googleAccountEmail: value.googleAccountEmail,
+    lastSyncedAt: value.lastSyncedAt,
+    syncStatus: value.syncStatus,
+    recurringEventId: value.recurringEventId,
   };
 }

@@ -53,21 +53,32 @@ export async function GET(request: Request) {
   try {
     const tokenResult = await exchangeOAuthCode(code);
     const now = new Date().toISOString();
+    const accountId = tokenResult.userEmail || "primary";
 
-    await saveEncryptedCredentials(sessionId, {
+    await saveEncryptedCredentials(
       sessionId,
-      userEmail: tokenResult.userEmail,
-      accessToken: tokenResult.accessToken,
-      refreshToken: tokenResult.refreshToken,
-      expiresAt: Date.now() + tokenResult.expiresIn * 1000,
-      scope: tokenResult.scope,
-      connectedAt: now,
-      updatedAt: now,
-    });
+      {
+        sessionId,
+        accountId,
+        userEmail: tokenResult.userEmail,
+        userName: tokenResult.userName,
+        userPicture: tokenResult.userPicture,
+        accessToken: tokenResult.accessToken,
+        refreshToken: tokenResult.refreshToken,
+        expiresAt: Date.now() + tokenResult.expiresIn * 1000,
+        scope: tokenResult.scope,
+        connectedAt: now,
+        updatedAt: now,
+      },
+      accountId
+    );
 
     const destination = stateVerification.returnUrl || "/";
     const redirectUrl = new URL(destination, baseUrl);
     redirectUrl.searchParams.set("gcal_status", "connected");
+    if (tokenResult.userEmail) {
+      redirectUrl.searchParams.set("gcal_account", tokenResult.userEmail);
+    }
     return NextResponse.redirect(redirectUrl.toString());
   } catch (err) {
     const message = err instanceof Error ? err.message : "Token exchange failed.";
