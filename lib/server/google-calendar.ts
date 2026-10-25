@@ -76,6 +76,13 @@ export class GoogleAuthError extends Error {
   }
 }
 
+export class GooglePreconditionFailedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GooglePreconditionFailedError";
+  }
+}
+
 /**
  * Robust fetch wrapper with exponential backoff for temporary rate limits (429) and server errors (5xx).
  */
@@ -514,19 +521,31 @@ export async function updateCalendarEvent(
   calendarId: string,
   eventId: string,
   event: GoogleEventPayload,
-  accountId?: string
+  accountId?: string,
+  etag?: string
 ): Promise<GoogleCalendarEvent> {
   const accessToken = await getValidAccessToken(sessionId, accountId);
+
+  const reqHeaders: Record<string, string> = {
+    Authorization: `Bearer ${accessToken}`,
+    "Content-Type": "application/json",
+  };
+  if (etag) {
+    reqHeaders["If-Match"] = etag;
+  }
 
   const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`;
   const response = await fetchWithRetry(url, {
     method: "PUT",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
+    headers: reqHeaders,
     body: JSON.stringify(event),
   });
+
+  if (response.status === 412) {
+    throw new GooglePreconditionFailedError(
+      `Event "${eventId}" was modified remotely on Google Calendar (ETag mismatch).`
+    );
+  }
 
   if (response.status === 403) {
     throw new ReadOnlyCalendarError(calendarId);
