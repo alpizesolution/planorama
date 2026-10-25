@@ -39,7 +39,7 @@ export function getServiceAccountCredentials(): ServiceAccountCredentials | null
       if (parsed.client_email && parsed.private_key) {
         return {
           clientEmail: parsed.client_email,
-          privateKey: parsed.private_key,
+          privateKey: (parsed.private_key as string).replace(/^["']|["']$/g, "").replace(/\\n/g, "\n"),
           projectId: parsed.project_id || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "planoramaph",
         };
       }
@@ -59,7 +59,7 @@ export function getServiceAccountCredentials(): ServiceAccountCredentials | null
   if (clientEmail && privateKey) {
     return {
       clientEmail,
-      privateKey: privateKey.replace(/\\n/g, "\n"),
+      privateKey: privateKey.replace(/^["']|["']$/g, "").replace(/\\n/g, "\n"),
       projectId,
     };
   }
@@ -76,10 +76,17 @@ export function isFirestoreConfigured(): boolean {
 }
 
 /**
- * Generates an OAuth2 access token for Firestore REST API using Google Service Account RSA-SHA256 JWT.
- * Caches token until 60 seconds before expiration.
+ * Clears the in-memory cached OAuth2 access token for Firestore REST calls.
  */
-export async function getFirestoreAccessToken(): Promise<string> {
+export function clearFirestoreTokenCache(): void {
+  cachedAccessToken = null;
+}
+
+/**
+ * Generates an OAuth2 access token for Firestore REST API using Google Service Account RSA-SHA256 JWT.
+ * Caches token until 60 seconds before expiration. Supports forceRefresh on 401 re-authentication.
+ */
+export async function getFirestoreAccessToken(forceRefresh = false): Promise<string> {
   const creds = getServiceAccountCredentials();
   if (!creds) {
     throw new StorageUnavailableError(
@@ -92,7 +99,7 @@ export async function getFirestoreAccessToken(): Promise<string> {
   }
 
   const nowSec = Math.floor(Date.now() / 1000);
-  if (cachedAccessToken && cachedAccessToken.expiresAt > nowSec + 60) {
+  if (!forceRefresh && cachedAccessToken && cachedAccessToken.expiresAt > nowSec + 60) {
     return cachedAccessToken.token;
   }
 
@@ -252,10 +259,51 @@ export function firestoreDocumentToJs(doc: { fields?: Record<string, Record<stri
 }
 
 function getFirestoreBaseUrl(projectId: string): string {
+  const databaseId = process.env.FIREBASE_DATABASE_ID || "(default)";
   if (process.env.FIRESTORE_EMULATOR_HOST) {
-    return `http://${process.env.FIRESTORE_EMULATOR_HOST}/v1/projects/${projectId}/databases/(default)/documents`;
+    return `http://${process.env.FIRESTORE_EMULATOR_HOST}/v1/projects/${projectId}/databases/${databaseId}/documents`;
   }
-  return `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents`;
+  return `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents`;
+}
+
+/**
+ * Executes an HTTP fetch with Firestore Service Account OAuth2 Bearer token,
+ * retrying transient errors and automatically refreshing token if 401 Unauthorized is returned.
+ */
+async function fetchWithFirestoreAuth(
+  url: string,
+  options: RequestInit,
+  docPath: string
+): Promise<Response> {
+  return executeWithRetry(async () => {
+    let token = await getFirestoreAccessToken();
+    const headers = new Headers(options.headers || {});
+    headers.set("Authorization", `Bearer ${token}`);
+
+    let res: Response;
+    try {
+      res = await fetch(url, { ...options, headers });
+    } catch (netErr) {
+      throw new StorageUnavailableError(`Network connection error accessing Firestore document ${docPath}`, netErr);
+    }
+
+    if (res.status === 401) {
+      // Access token may have expired or been revoked: clear cache, force refresh, and retry once
+      clearFirestoreTokenCache();
+      token = await getFirestoreAccessToken(true);
+      headers.set("Authorization", `Bearer ${token}`);
+      try {
+        res = await fetch(url, { ...options, headers });
+      } catch (retryNetErr) {
+        throw new StorageUnavailableError(
+          `Network connection error accessing Firestore document ${docPath} after token refresh`,
+          retryNetErr
+        );
+      }
+    }
+
+    return res;
+  });
 }
 
 /**
@@ -269,40 +317,34 @@ export async function getFirestoreDocument(
     throw new StorageUnavailableError("Firestore credentials not configured");
   }
 
-  const token = await getFirestoreAccessToken();
   const url = `${getFirestoreBaseUrl(creds.projectId)}/${docPath}`;
+  const res = await fetchWithFirestoreAuth(
+    url,
+    {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+      },
+    },
+    docPath
+  );
 
-  return executeWithRetry(async () => {
-    let res: Response;
-    try {
-      res = await fetch(url, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/json",
-        },
-      });
-    } catch (netErr) {
-      throw new StorageUnavailableError(`Network connection error reading Firestore document ${docPath}`, netErr);
-    }
+  if (res.status === 404) {
+    return null;
+  }
 
-    if (res.status === 404) {
-      return null;
-    }
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    const err = new StorageUnavailableError(`Firestore GET failed for ${docPath}: ${res.status} ${errText}`);
+    (err as { status?: number }).status = res.status;
+    throw err;
+  }
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      const err = new StorageUnavailableError(`Firestore GET failed for ${docPath}: ${res.status} ${errText}`);
-      (err as { status?: number }).status = res.status;
-      throw err;
-    }
-
-    const docJson = await res.json();
-    return {
-      data: firestoreDocumentToJs(docJson),
-      updateTime: docJson.updateTime,
-    };
-  });
+  const docJson = await res.json();
+  return {
+    data: firestoreDocumentToJs(docJson),
+    updateTime: docJson.updateTime,
+  };
 }
 
 /**
@@ -313,13 +355,12 @@ export async function setFirestoreDocument(
   docPath: string,
   fields: Record<string, unknown>,
   precondition?: { exists?: boolean; updateTime?: string }
-): Promise<void> {
+): Promise<{ updateTime?: string }> {
   const creds = getServiceAccountCredentials();
   if (!creds) {
     throw new StorageUnavailableError("Firestore credentials not configured");
   }
 
-  const token = await getFirestoreAccessToken();
   let url = `${getFirestoreBaseUrl(creds.projectId)}/${docPath}`;
 
   const queryParams: string[] = [];
@@ -341,73 +382,81 @@ export async function setFirestoreDocument(
     }
   }
 
-  return executeWithRetry(async () => {
-    let res: Response;
-    try {
-      res = await fetch(url, {
-        method: "PATCH",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ fields: firestoreFields }),
-      });
-    } catch (netErr) {
-      throw new StorageUnavailableError(`Network error writing Firestore document ${docPath}`, netErr);
-    }
+  const res = await fetchWithFirestoreAuth(
+    url,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ fields: firestoreFields }),
+    },
+    docPath
+  );
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      const err = new StorageUnavailableError(`Firestore PATCH failed for ${docPath}: ${res.status} ${errText}`);
-      (err as { status?: number }).status = res.status;
-      throw err;
-    }
-  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    const err = new StorageUnavailableError(`Firestore PATCH failed for ${docPath}: ${res.status} ${errText}`);
+    (err as { status?: number }).status = res.status;
+    throw err;
+  }
+
+  const docJson = await res.json().catch(() => ({}));
+  return { updateTime: docJson.updateTime };
 }
 
 /**
  * Deletes a Firestore document via REST API.
+ * Supports preconditions to prevent race conditions during deletion.
  */
-export async function deleteFirestoreDocument(docPath: string): Promise<void> {
+export async function deleteFirestoreDocument(
+  docPath: string,
+  precondition?: { exists?: boolean; updateTime?: string }
+): Promise<void> {
   const creds = getServiceAccountCredentials();
   if (!creds) {
     throw new StorageUnavailableError("Firestore credentials not configured");
   }
 
-  const token = await getFirestoreAccessToken();
-  const url = `${getFirestoreBaseUrl(creds.projectId)}/${docPath}`;
+  let url = `${getFirestoreBaseUrl(creds.projectId)}/${docPath}`;
 
-  return executeWithRetry(async () => {
-    let res: Response;
-    try {
-      res = await fetch(url, {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-    } catch (netErr) {
-      throw new StorageUnavailableError(`Network error deleting Firestore document ${docPath}`, netErr);
-    }
+  const queryParams: string[] = [];
+  if (precondition?.exists !== undefined) {
+    queryParams.push(`currentDocument.exists=${precondition.exists}`);
+  }
+  if (precondition?.updateTime) {
+    queryParams.push(`currentDocument.updateTime=${encodeURIComponent(precondition.updateTime)}`);
+  }
 
-    if (res.status === 404) {
-      return; // Already deleted
-    }
+  if (queryParams.length > 0) {
+    url += `?${queryParams.join("&")}`;
+  }
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      const err = new StorageUnavailableError(`Firestore DELETE failed for ${docPath}: ${res.status} ${errText}`);
-      (err as { status?: number }).status = res.status;
-      throw err;
-    }
-  });
+  const res = await fetchWithFirestoreAuth(
+    url,
+    {
+      method: "DELETE",
+    },
+    docPath
+  );
+
+  if (res.status === 404) {
+    return; // Already deleted
+  }
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    const err = new StorageUnavailableError(`Firestore DELETE failed for ${docPath}: ${res.status} ${errText}`);
+    (err as { status?: number }).status = res.status;
+    throw err;
+  }
 }
 
 /**
  * Firestore path helpers scoped strictly by authenticated user ownership.
  */
 function sanitizeOwnerId(ownerId: string): string {
-  return encodeURIComponent(ownerId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 128));
+  return encodeURIComponent(ownerId.replace(/[\/\\]/g, "_").slice(0, 128));
 }
 
 export function getFirestoreCredentialsPath(ownerId: string): string {
@@ -487,7 +536,48 @@ export async function acquireFirestoreSyncLock(
 }
 
 /**
+ * Renews an existing sync lock held by the same instance before it expires.
+ * Uses updateTime precondition to guarantee atomic renewal across serverless instances.
+ */
+export async function renewFirestoreSyncLock(
+  ownerId: string,
+  extensionMs = 60000,
+  instanceId: string = crypto.randomUUID()
+): Promise<boolean> {
+  const lockPath = getFirestoreSyncLockPath(ownerId);
+  const existing = await getFirestoreDocument(lockPath);
+
+  if (!existing || existing.data.lockedBy !== instanceId) {
+    return false; // Not held by this instance
+  }
+
+  const now = Date.now();
+  const lockedUntil = now + extensionMs;
+
+  try {
+    await setFirestoreDocument(
+      lockPath,
+      {
+        lockedUntil,
+        lockedBy: instanceId,
+        acquiredAt: existing.data.acquiredAt || now,
+        renewedAt: now,
+      },
+      { updateTime: existing.updateTime }
+    );
+    return true;
+  } catch (err: unknown) {
+    const status = (err as { status?: number }).status;
+    if (status === 400 || status === 409) {
+      return false; // Lock was overtaken or modified
+    }
+    throw err;
+  }
+}
+
+/**
  * Releases the sync lock in Firestore.
+ * Ensures an instance only releases its own un-overtaken lock using updateTime precondition.
  */
 export async function releaseFirestoreSyncLock(
   ownerId: string,
@@ -498,8 +588,10 @@ export async function releaseFirestoreSyncLock(
   if (instanceId) {
     const existing = await getFirestoreDocument(lockPath);
     if (!existing || existing.data.lockedBy !== instanceId) {
-      return; // Do not release if held by another instance
+      return; // Do not release if held by another instance or already gone
     }
+    await deleteFirestoreDocument(lockPath, { updateTime: existing.updateTime }).catch(() => {});
+    return;
   }
 
   await deleteFirestoreDocument(lockPath).catch(() => {});
@@ -543,7 +635,16 @@ export class MockFirestoreStore {
     });
   }
 
-  async deleteDocument(docPath: string): Promise<void> {
+  async deleteDocument(
+    docPath: string,
+    precondition?: { exists?: boolean; updateTime?: string }
+  ): Promise<void> {
+    const existing = this.docs.get(docPath);
+    if (precondition?.updateTime && existing && existing.updateTime !== precondition.updateTime) {
+      const err = new StorageUnavailableError(`Precondition failed: document ${docPath} updateTime mismatch.`);
+      (err as { status?: number }).status = 409;
+      throw err;
+    }
     this.docs.delete(docPath);
   }
 
@@ -575,13 +676,35 @@ export class MockFirestoreStore {
     }
   }
 
+  async renewLock(ownerId: string, extensionMs: number, instanceId: string): Promise<boolean> {
+    const lockPath = getFirestoreSyncLockPath(ownerId);
+    const existing = await this.getDocument(lockPath);
+    if (!existing || existing.data.lockedBy !== instanceId) {
+      return false;
+    }
+    const now = Date.now();
+    const lockedUntil = now + extensionMs;
+    try {
+      await this.setDocument(
+        lockPath,
+        { lockedUntil, lockedBy: instanceId, acquiredAt: existing.data.acquiredAt || now, renewedAt: now },
+        { updateTime: existing.updateTime }
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async releaseLock(ownerId: string, instanceId?: string): Promise<void> {
     const lockPath = getFirestoreSyncLockPath(ownerId);
     if (instanceId) {
       const doc = await this.getDocument(lockPath);
       if (!doc || doc.data.lockedBy !== instanceId) return;
+      await this.deleteDocument(lockPath, { updateTime: doc.updateTime }).catch(() => {});
+      return;
     }
-    await this.deleteDocument(lockPath);
+    await this.deleteDocument(lockPath).catch(() => {});
   }
 
   clear(): void {

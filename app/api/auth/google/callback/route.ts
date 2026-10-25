@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getVerifiedSessionId } from "@/lib/server/session";
+import { getVerifiedSession } from "@/lib/server/session";
 import { verifySignedOAuthState } from "@/lib/server/crypto";
 import { exchangeOAuthCode } from "@/lib/server/google-calendar";
 import { saveEncryptedCredentials } from "@/lib/server/google-token-store";
@@ -33,15 +33,15 @@ export async function GET(request: Request) {
   }
 
   // 2. Verify authenticated session
-  const sessionId = await getVerifiedSessionId();
-  if (!sessionId) {
+  const session = await getVerifiedSession();
+  if (!session) {
     const redirectUrl = new URL("/", baseUrl);
     redirectUrl.searchParams.set("gcal_error", "session_not_found");
     return NextResponse.redirect(redirectUrl.toString());
   }
 
   // 3. Verify signed OAuth state (CSRF and session fixation protection)
-  const stateVerification = verifySignedOAuthState(state, sessionId);
+  const stateVerification = verifySignedOAuthState(state, session.sessionId, undefined, session.userId);
   if (!stateVerification.valid) {
     console.error("[Auth/GoogleCallback] State verification failed:", stateVerification.error);
     const redirectUrl = new URL("/", baseUrl);
@@ -55,10 +55,12 @@ export async function GET(request: Request) {
     const now = new Date().toISOString();
     const accountId = tokenResult.userEmail || "primary";
 
+    // Persist credentials scoped strictly under the verified Firebase UID / user ID
     await saveEncryptedCredentials(
-      sessionId,
+      session.userId,
       {
-        sessionId,
+        sessionId: session.sessionId,
+        userId: session.userId,
         accountId,
         userEmail: tokenResult.userEmail,
         userName: tokenResult.userName,

@@ -9,6 +9,7 @@ import {
   saveSyncToken,
   getSyncToken,
   acquireSyncLock,
+  renewSyncLock,
   releaseSyncLock,
   setTestFirestoreStore,
   StorageUnavailableError,
@@ -19,6 +20,11 @@ import {
   executeWithRetry,
   jsToFirestoreValue,
   firestoreValueToJs,
+  getFirestoreDocument,
+  setFirestoreDocument,
+  deleteFirestoreDocument,
+  clearFirestoreTokenCache,
+  getFirestoreSyncLockPath,
 } from "./firestore-store";
 import { GoogleAuthError, getValidAccessToken } from "./google-calendar";
 
@@ -336,4 +342,204 @@ describe("Vercel Production Storage Remediation - Distributed Datastore", () => 
     expect(backToJs.arrayValue).toEqual(["a", "b"]);
     expect(backToJs.nested.key).toBe("val");
   });
+
+  it("9. Lock renewal and atomic safe release: allows instance renewal and prevents stale release from deleting overtaken lock", async () => {
+    const userId = "lock_renewal_test_user";
+
+    // Instance A acquires lock
+    const acquiredA = await acquireSyncLock(userId, 60000, "instance_A");
+    expect(acquiredA).toBe(true);
+
+    // Instance A successfully renews its lock
+    const renewedA = await renewSyncLock(userId, 60000, "instance_A");
+    expect(renewedA).toBe(true);
+
+    // Instance B cannot renew Instance A's lock
+    const renewedByB = await renewSyncLock(userId, 60000, "instance_B");
+    expect(renewedByB).toBe(false);
+
+    // Simulate expiration of Instance A's lock
+    const lockPath = getFirestoreSyncLockPath(userId);
+    const lockDoc = await mockStore.getDocument(lockPath);
+    expect(lockDoc).not.toBeNull();
+    if (lockDoc) {
+      await mockStore.setDocument(
+        lockPath,
+        { ...lockDoc.data, lockedUntil: Date.now() - 1000 },
+        { updateTime: lockDoc.updateTime }
+      );
+    }
+
+    // Instance B acquires the expired lock
+    const acquiredB = await acquireSyncLock(userId, 60000, "instance_B");
+    expect(acquiredB).toBe(true);
+
+    // Instance A (slow instance waking up late) attempts to release lock with its instanceId
+    await releaseSyncLock(userId, "instance_A");
+
+    // CRITICAL: Instance B's lock MUST NOT be deleted by Instance A
+    const activeDocAfterA = await mockStore.getDocument(lockPath);
+    expect(activeDocAfterA).not.toBeNull();
+    expect(activeDocAfterA?.data.lockedBy).toBe("instance_B");
+
+    // Instance B cleanly releases its lock
+    await releaseSyncLock(userId, "instance_B");
+    const activeDocAfterB = await mockStore.getDocument(lockPath);
+    expect(activeDocAfterB).toBeNull();
+  });
+
+  it("10. Encryption key rotation: backward-compatible decryption with fallback key and re-encryption with primary key", async () => {
+    const userId = "key_rotation_user";
+    const oldKey = "old-secret-key-that-was-rotated-32chars";
+    const newKey = "new-brand-fresh-production-secret-key-32ch";
+
+    const originalEnv = { ...process.env };
+
+    try {
+      // 1. Initial state: data encrypted with old key
+      process.env.GOOGLE_ENCRYPTION_SECRET = oldKey;
+      delete process.env.GOOGLE_ENCRYPTION_SECRET_FALLBACK;
+
+      const sampleCreds: StoredGoogleCredentials = {
+        sessionId: userId,
+        userId,
+        accountId: "rotation@planorama.app",
+        userEmail: "rotation@planorama.app",
+        accessToken: "ya29.old_key_token",
+        refreshToken: "refresh_old_key",
+        expiresAt: Date.now() + 3600000,
+        scope: "https://www.googleapis.com/auth/calendar",
+        connectedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      await saveEncryptedCredentials(userId, sampleCreds);
+
+      // 2. Secret Rotation: new key becomes primary, old key becomes fallback
+      process.env.GOOGLE_ENCRYPTION_SECRET = newKey;
+      process.env.GOOGLE_ENCRYPTION_SECRET_FALLBACK = oldKey;
+
+      // Able to decrypt with fallback key!
+      const decryptedWithFallback = await getDecryptedCredentials(userId, "rotation@planorama.app");
+      expect(decryptedWithFallback).not.toBeNull();
+      expect(decryptedWithFallback?.accessToken).toBe("ya29.old_key_token");
+
+      // 3. Re-saving re-encrypts with new primary key
+      await saveEncryptedCredentials(userId, decryptedWithFallback!);
+
+      // 4. Decommission fallback key
+      delete process.env.GOOGLE_ENCRYPTION_SECRET_FALLBACK;
+
+      // Able to decrypt with new primary key alone
+      const decryptedWithNewOnly = await getDecryptedCredentials(userId, "rotation@planorama.app");
+      expect(decryptedWithNewOnly).not.toBeNull();
+      expect(decryptedWithNewOnly?.accessToken).toBe("ya29.old_key_token");
+    } finally {
+      process.env = originalEnv;
+    }
+  });
+
+  it("11. Firestore REST wire protocol: verifies endpoints, headers, preconditions, and 401 token refresh", async () => {
+    // Switch to real Firestore mode for wire protocol tests
+    setTestFirestoreStore(null);
+
+    const originalEnv = { ...process.env };
+    const originalFetch = globalThis.fetch;
+
+    try {
+      process.env.FIRESTORE_EMULATOR_HOST = "localhost:8080";
+      process.env.FIREBASE_PROJECT_ID = "test-project-123";
+      process.env.FIREBASE_DATABASE_ID = "custom-db";
+      clearFirestoreTokenCache();
+
+      const capturedRequests: Array<{ url: string; method: string; headers: Record<string, string>; body?: string }> = [];
+      let return401Once = true;
+
+      globalThis.fetch = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const urlStr = typeof input === "string" ? input : input.toString();
+        const headers: Record<string, string> = {};
+        if (init?.headers) {
+          const h = new Headers(init.headers);
+          h.forEach((val, key) => {
+            headers[key] = val;
+          });
+        }
+
+        capturedRequests.push({
+          url: urlStr,
+          method: init?.method || "GET",
+          headers,
+          body: typeof init?.body === "string" ? init.body : undefined,
+        });
+
+        // Test 401 token refresh: return 401 on the first call, succeed on retry
+        if (return401Once && init?.method === "GET") {
+          return401Once = false;
+          return new Response("Unauthorized", { status: 401 });
+        }
+
+        if (init?.method === "GET") {
+          return new Response(
+            JSON.stringify({
+              fields: {
+                title: { stringValue: "Wire Protocol Test" },
+              },
+              updateTime: "2026-10-26T00:00:00.000000Z",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+
+        if (init?.method === "PATCH") {
+          return new Response(
+            JSON.stringify({
+              fields: {
+                saved: { booleanValue: true },
+              },
+              updateTime: "2026-10-26T00:00:01.000000Z",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+
+        if (init?.method === "DELETE") {
+          return new Response("", { status: 200 });
+        }
+
+        return new Response("Not Found", { status: 404 });
+      });
+
+      // 1. GET with 401 recovery
+      const doc = await getFirestoreDocument("users/test-uid/test-doc");
+      expect(doc).not.toBeNull();
+      expect(doc?.data.title).toBe("Wire Protocol Test");
+
+      // Verify URL used custom database ID and emulator host
+      expect(capturedRequests[0].url).toContain(
+        "http://localhost:8080/v1/projects/test-project-123/databases/custom-db/documents/users/test-uid/test-doc"
+      );
+      expect(capturedRequests[0].headers.authorization).toBe("Bearer owner");
+      // 401 caused a retry
+      expect(capturedRequests).toHaveLength(2);
+
+      // 2. PATCH with precondition
+      capturedRequests.length = 0;
+      await setFirestoreDocument("users/test-uid/test-doc", { count: 10 }, { updateTime: "2026-10-26T00:00:00.000000Z" });
+
+      expect(capturedRequests[0].method).toBe("PATCH");
+      expect(capturedRequests[0].url).toContain("currentDocument.updateTime=2026-10-26T00%3A00%3A00.000000Z");
+      expect(capturedRequests[0].headers["content-type"]).toBe("application/json");
+
+      // 3. DELETE with precondition
+      capturedRequests.length = 0;
+      await deleteFirestoreDocument("users/test-uid/test-doc", { updateTime: "2026-10-26T00:00:01.000000Z" });
+
+      expect(capturedRequests[0].method).toBe("DELETE");
+      expect(capturedRequests[0].url).toContain("currentDocument.updateTime=2026-10-26T00%3A00%3A01.000000Z");
+    } finally {
+      process.env = originalEnv;
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
+

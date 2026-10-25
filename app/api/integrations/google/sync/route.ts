@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { getVerifiedSession } from "@/lib/server/session";
 import {
@@ -5,6 +6,7 @@ import {
   saveSyncMeta,
   formatSyncTokenKey,
   acquireSyncLock,
+  renewSyncLock,
   releaseSyncLock,
   getAllConnectedAccounts,
 } from "@/lib/server/google-token-store";
@@ -92,8 +94,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Session required." }, { status: 401 });
   }
 
-  // 1. In-flight synchronization mutex lock
-  const lockAcquired = await acquireSyncLock(session.userId);
+  const syncInstanceId = crypto.randomUUID();
+
+  // 1. In-flight synchronization mutex lock with instance ownership
+  const lockAcquired = await acquireSyncLock(session.userId, 60000, syncInstanceId);
   if (!lockAcquired) {
     return NextResponse.json(
       { error: "A synchronization operation is already in progress for this account. Please wait a moment." },
@@ -284,6 +288,9 @@ export async function POST(request: Request) {
         if (latestNextSyncToken) {
           updatedSyncTokens[syncKey] = latestNextSyncToken;
         }
+
+        // Renew sync lock for long multi-calendar sync operations
+        await renewSyncLock(session.userId, 60000, syncInstanceId);
       } catch (calErr) {
         const msg = calErr instanceof Error ? calErr.message : `Failed to sync calendar "${calendar.name}".`;
         console.warn(`[Sync] Calendar error (${calendar.id}):`, msg);
@@ -461,7 +468,7 @@ export async function POST(request: Request) {
     console.error("[Integrations/Google/Sync] Error:", message);
     return NextResponse.json({ error: message }, { status: 500 });
   } finally {
-    // Always release in-flight sync lock
-    await releaseSyncLock(session.userId);
+    // Always release in-flight sync lock safely with instanceId check
+    await releaseSyncLock(session.userId, syncInstanceId);
   }
 }

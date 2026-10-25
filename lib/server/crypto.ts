@@ -307,7 +307,8 @@ export function createSignedOAuthState(
 export function verifySignedOAuthState(
   state: string,
   expectedSessionId: string,
-  maxAgeMs = 10 * 60 * 1000 // 10 minutes
+  maxAgeMs = 10 * 60 * 1000, // 10 minutes
+  expectedUserId?: string
 ): { valid: boolean; returnUrl?: string; userId?: string; error?: string } {
   if (!state || !state.includes(".")) {
     return { valid: false, error: "Malformed OAuth state parameter." };
@@ -324,6 +325,10 @@ export function verifySignedOAuthState(
 
     if (parsed.sessionId !== expectedSessionId) {
       return { valid: false, error: "State session does not match authenticated user." };
+    }
+
+    if (expectedUserId && parsed.userId && parsed.userId !== expectedUserId) {
+      return { valid: false, error: "State user identity does not match authenticated user." };
     }
 
     const now = Date.now();

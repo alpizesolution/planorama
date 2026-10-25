@@ -12,6 +12,7 @@ import {
   getFirestoreCredentialsPath,
   getFirestoreSyncMetaPath,
   acquireFirestoreSyncLock,
+  renewFirestoreSyncLock,
   releaseFirestoreSyncLock,
   MockFirestoreStore,
 } from "./firestore-store";
@@ -757,6 +758,37 @@ export async function acquireSyncLock(
 }
 
 /**
+ * Renews an in-flight sync lock for a long-running sync operation.
+ * Returns true if the lock was renewed, false if it expired or is owned by another instance.
+ */
+export async function renewSyncLock(
+  ownerId: string,
+  extensionMs = 60000,
+  instanceId?: string
+): Promise<boolean> {
+  const mode = getActiveStorageMode();
+
+  if (mode === "mock_firestore" && activeMockStore) {
+    if (!instanceId) return false;
+    return await activeMockStore.renewLock(ownerId, extensionMs, instanceId);
+  }
+
+  if (mode === "firestore") {
+    if (!instanceId) return false;
+    return await renewFirestoreSyncLock(ownerId, extensionMs, instanceId);
+  }
+
+  const now = Date.now();
+  const existingLockExpiry = syncLocks.get(ownerId);
+  if (!existingLockExpiry || existingLockExpiry <= now) {
+    return false;
+  }
+
+  syncLocks.set(ownerId, now + extensionMs);
+  return true;
+}
+
+/**
  * Releases an in-flight sync lock for a user.
  */
 export async function releaseSyncLock(ownerId: string, instanceId?: string): Promise<void> {
@@ -774,3 +806,4 @@ export async function releaseSyncLock(ownerId: string, instanceId?: string): Pro
 
   syncLocks.delete(ownerId);
 }
+
