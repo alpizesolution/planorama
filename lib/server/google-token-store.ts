@@ -3,13 +3,20 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { encryptText, decryptText, type EncryptedPayload } from "./crypto";
 import type { GoogleCalendarItem } from "./google-calendar";
+import {
+  StorageUnavailableError,
+  isFirestoreConfigured,
+  getFirestoreDocument,
+  setFirestoreDocument,
+  deleteFirestoreDocument,
+  getFirestoreCredentialsPath,
+  getFirestoreSyncMetaPath,
+  acquireFirestoreSyncLock,
+  releaseFirestoreSyncLock,
+  MockFirestoreStore,
+} from "./firestore-store";
 
-export class StorageUnavailableError extends Error {
-  constructor(message: string, public readonly cause?: unknown) {
-    super(message);
-    this.name = "StorageUnavailableError";
-  }
-}
+export { StorageUnavailableError } from "./firestore-store";
 
 export interface StoredGoogleCredentials {
   sessionId: string;
@@ -59,12 +66,35 @@ export interface StoredCalendarSyncMeta {
   };
 }
 
-// Durable file storage directory
+// Durable file storage directory (local dev / migration source)
 const STORAGE_BASE_DIR = path.join(process.cwd(), ".planorama", "storage", "users");
 const LEGACY_STORAGE_DIR = path.join(process.cwd(), ".planorama", "tokens");
 
-// In-flight sync locks with expiration
+// In-flight sync locks for local/memory fallback
 const syncLocks = new Map<string, number>();
+
+// Optional mock Firestore store for unit testing multi-instance serverless behavior
+let activeMockStore: MockFirestoreStore | null = null;
+
+export function setTestFirestoreStore(mockStore: MockFirestoreStore | null): void {
+  activeMockStore = mockStore;
+}
+
+export function getTestFirestoreStore(): MockFirestoreStore | null {
+  return activeMockStore;
+}
+
+/**
+ * Determine active persistence backend:
+ * 1. Mock Firestore (if explicitly injected for test execution)
+ * 2. Real Firestore REST (if Firebase service account credentials or emulator configured)
+ * 3. Local filesystem (for offline local development)
+ */
+function getActiveStorageMode(): "mock_firestore" | "firestore" | "filesystem" {
+  if (activeMockStore) return "mock_firestore";
+  if (isFirestoreConfigured()) return "firestore";
+  return "filesystem";
+}
 
 /**
  * Sanitize an owner/user ID for safe directory and file naming (prevents path traversal).
@@ -170,13 +200,146 @@ function normalizeUserData(ownerId: string, rawData: unknown): StoredUserGoogleD
 }
 
 /**
+ * Migrates local filesystem credentials to Firestore with verification.
+ * Source file is NEVER deleted until migration is verified.
+ */
+async function migrateFilesystemToFirestore(
+  ownerId: string,
+  targetStore: "mock" | "real" = "real"
+): Promise<StoredUserGoogleData | null> {
+  const filePath = getCredentialsFilePath(ownerId);
+  const legacyPath = getLegacyFilePath(ownerId);
+
+  let rawEncrypted: string | null = null;
+  let sourcePath: string | null = null;
+
+  try {
+    rawEncrypted = await fs.readFile(filePath, "utf8");
+    sourcePath = filePath;
+  } catch {
+    try {
+      rawEncrypted = await fs.readFile(legacyPath, "utf8");
+      sourcePath = legacyPath;
+    } catch {
+      return null; // No filesystem data exists
+    }
+  }
+
+  if (!rawEncrypted || !sourcePath) return null;
+
+  let payload: EncryptedPayload;
+  let normalized: StoredUserGoogleData;
+
+  try {
+    payload = JSON.parse(rawEncrypted) as EncryptedPayload;
+    const decryptedJson = decryptText(payload);
+    const parsed = JSON.parse(decryptedJson);
+    normalized = normalizeUserData(ownerId, parsed);
+  } catch (err) {
+    console.warn(`[TokenStore] Cannot decrypt source file during migration for ${sanitizeId(ownerId)}:`, err);
+    return null;
+  }
+
+  const docPath = getFirestoreCredentialsPath(ownerId);
+  const docFields = {
+    encryptedPayload: payload,
+    primaryAccountId: normalized.primaryAccountId,
+    ownerId,
+    updatedAt: normalized.updatedAt,
+    migratedFrom: sourcePath,
+    migratedAt: new Date().toISOString(),
+  };
+
+  if (targetStore === "mock" && activeMockStore) {
+    await activeMockStore.setDocument(docPath, docFields as unknown as Record<string, unknown>);
+    const verified = await activeMockStore.getDocument(docPath);
+    if (!verified) {
+      throw new StorageUnavailableError("Mock migration verification failed: document missing after write.");
+    }
+  } else {
+    await setFirestoreDocument(docPath, docFields);
+    const verified = await getFirestoreDocument(docPath);
+    if (!verified || !verified.data.encryptedPayload) {
+      throw new StorageUnavailableError("Firestore migration verification failed: document missing after write.");
+    }
+  }
+
+  // Migration verified! Write marker file next to source. NEVER delete source file.
+  try {
+    await fs.writeFile(
+      `${sourcePath}.migrated`,
+      JSON.stringify({
+        migratedAt: new Date().toISOString(),
+        ownerId,
+        targetPath: docPath,
+      }),
+      "utf8"
+    );
+  } catch {
+    // Non-fatal marker write
+  }
+
+  return normalized;
+}
+
+/**
  * Loads and decrypts stored Google account data for a user or session.
- * Automatically checks and migrates legacy token files if present.
  */
 async function loadUserData(ownerId: string): Promise<StoredUserGoogleData> {
+  const mode = getActiveStorageMode();
+
+  // Mode 1: Mock Firestore for unit tests
+  if (mode === "mock_firestore" && activeMockStore) {
+    const docPath = getFirestoreCredentialsPath(ownerId);
+    const doc = await activeMockStore.getDocument(docPath);
+    if (doc && doc.data.encryptedPayload) {
+      const payload = doc.data.encryptedPayload as EncryptedPayload;
+      const decryptedJson = decryptText(payload);
+      return normalizeUserData(ownerId, JSON.parse(decryptedJson));
+    }
+    // Check migration from filesystem if mock has no data
+    const migrated = await migrateFilesystemToFirestore(ownerId, "mock").catch(() => null);
+    if (migrated) return migrated;
+    return { ownerId, accounts: {}, updatedAt: new Date().toISOString() };
+  }
+
+  // Mode 2: Real Firestore REST API
+  if (mode === "firestore") {
+    const docPath = getFirestoreCredentialsPath(ownerId);
+    try {
+      const doc = await getFirestoreDocument(docPath);
+      if (doc && doc.data.encryptedPayload) {
+        const payload = doc.data.encryptedPayload as EncryptedPayload;
+        const decryptedJson = decryptText(payload);
+        return normalizeUserData(ownerId, JSON.parse(decryptedJson));
+      }
+    } catch (fsErr) {
+      console.warn(`[TokenStore] Firestore read error for ${sanitizeId(ownerId)}:`, fsErr);
+      throw fsErr;
+    }
+
+    // Document not yet in Firestore -> check and migrate filesystem storage
+    const migrated = await migrateFilesystemToFirestore(ownerId, "real").catch((migErr) => {
+      console.warn(`[TokenStore] Migration failed for ${sanitizeId(ownerId)}:`, migErr);
+      return null;
+    });
+
+    if (migrated) {
+      return migrated;
+    }
+
+    return { ownerId, accounts: {}, updatedAt: new Date().toISOString() };
+  }
+
+  // Mode 3: Local Filesystem storage (Offline Dev Fallback)
+  if (process.env.VERCEL === "1" || (process.env.NODE_ENV === "production" && !isFirestoreConfigured())) {
+    console.warn(
+      `[TokenStore] WARNING: Running on Vercel without Firestore credentials. Filesystem persistence will NOT persist across serverless instances!`
+    );
+  }
+
   const filePath = getCredentialsFilePath(ownerId);
 
-  // 1. Check current durable file
   try {
     const raw = await fs.readFile(filePath, "utf8");
     const payload = JSON.parse(raw) as EncryptedPayload;
@@ -186,12 +349,11 @@ async function loadUserData(ownerId: string): Promise<StoredUserGoogleData> {
   } catch (readErr: unknown) {
     const nodeErr = readErr as { code?: string };
     if (nodeErr.code !== "ENOENT") {
-      // If file exists but failed to read or decrypt, throw or log warning
-      console.warn(`[TokenStore] Could not read credentials for ${sanitizeId(ownerId)}:`, readErr);
+      console.warn(`[TokenStore] Could not read credentials file for ${sanitizeId(ownerId)}:`, readErr);
     }
   }
 
-  // 2. Check legacy storage path for backward compatibility
+  // Check legacy path
   try {
     const legacyPath = getLegacyFilePath(ownerId);
     const rawLegacy = await fs.readFile(legacyPath, "utf8");
@@ -200,16 +362,14 @@ async function loadUserData(ownerId: string): Promise<StoredUserGoogleData> {
     const parsed = JSON.parse(decryptedJson);
     const normalized = normalizeUserData(ownerId, parsed);
 
-    // Migrate to durable location immediately
     if (Object.keys(normalized.accounts).length > 0) {
       await writeUserData(ownerId, normalized).catch((migErr) => {
-        console.warn("[TokenStore] Failed to migrate legacy credentials:", migErr);
+        console.warn("[TokenStore] Failed to migrate legacy file:", migErr);
       });
     }
 
     return normalized;
   } catch {
-    // No credentials found
     return { ownerId, accounts: {}, updatedAt: new Date().toISOString() };
   }
 }
@@ -220,6 +380,30 @@ async function loadUserData(ownerId: string): Promise<StoredUserGoogleData> {
  */
 async function writeUserData(ownerId: string, data: StoredUserGoogleData): Promise<void> {
   const payload = encryptText(JSON.stringify(data));
+  const mode = getActiveStorageMode();
+
+  if (mode === "mock_firestore" && activeMockStore) {
+    const docPath = getFirestoreCredentialsPath(ownerId);
+    await activeMockStore.setDocument(docPath, {
+      encryptedPayload: payload,
+      primaryAccountId: data.primaryAccountId,
+      ownerId,
+      updatedAt: data.updatedAt,
+    } as unknown as Record<string, unknown>);
+    return;
+  }
+
+  if (mode === "firestore") {
+    const docPath = getFirestoreCredentialsPath(ownerId);
+    await setFirestoreDocument(docPath, {
+      encryptedPayload: payload,
+      primaryAccountId: data.primaryAccountId,
+      ownerId,
+      updatedAt: data.updatedAt,
+    });
+    return;
+  }
+
   const filePath = getCredentialsFilePath(ownerId);
   await atomicWriteFile(filePath, JSON.stringify(payload));
 }
@@ -278,7 +462,7 @@ export async function getDecryptedCredentials(
 
   let selectedAccount: StoredGoogleAccount | undefined;
 
-  if (targetAccountId && accounts[targetAccountId]) {
+  if (targetAccountId) {
     selectedAccount = accounts[targetAccountId];
   } else if (data.primaryAccountId && accounts[data.primaryAccountId]) {
     selectedAccount = accounts[data.primaryAccountId];
@@ -319,16 +503,27 @@ export async function getAllConnectedAccounts(ownerId: string): Promise<StoredGo
  * Delete credentials for a specific account, or disconnect all accounts.
  */
 export async function deleteCredentials(ownerId: string, targetAccountId?: string): Promise<void> {
+  const mode = getActiveStorageMode();
   const data = await loadUserData(ownerId);
 
   if (!targetAccountId) {
     // Delete all credentials for this user
+    if (mode === "mock_firestore" && activeMockStore) {
+      await activeMockStore.deleteDocument(getFirestoreCredentialsPath(ownerId));
+      await activeMockStore.deleteDocument(getFirestoreSyncMetaPath(ownerId));
+      return;
+    }
+
+    if (mode === "firestore") {
+      await deleteFirestoreDocument(getFirestoreCredentialsPath(ownerId)).catch(() => {});
+      await deleteFirestoreDocument(getFirestoreSyncMetaPath(ownerId)).catch(() => {});
+      return;
+    }
+
     const filePath = getCredentialsFilePath(ownerId);
     await fs.unlink(filePath).catch(() => {});
     const legacyPath = getLegacyFilePath(ownerId);
     await fs.unlink(legacyPath).catch(() => {});
-
-    // Clear sync meta as well
     const metaPath = getSyncMetaFilePath(ownerId);
     await fs.unlink(metaPath).catch(() => {});
     return;
@@ -338,7 +533,6 @@ export async function deleteCredentials(ownerId: string, targetAccountId?: strin
   if (data.accounts[targetAccountId]) {
     delete data.accounts[targetAccountId];
 
-    // Reassign primary account if needed
     if (data.primaryAccountId === targetAccountId) {
       const remainingKeys = Object.keys(data.accounts);
       data.primaryAccountId = remainingKeys[0] || undefined;
@@ -364,7 +558,7 @@ export async function migrateSessionOwnership(guestSessionId: string, targetUser
   // 1. Load guest data
   const guestData = await loadUserData(guestSessionId);
   if (Object.keys(guestData.accounts).length === 0) {
-    return; // Nothing to migrate
+    return;
   }
 
   // 2. Load target user data
@@ -405,9 +599,21 @@ export function formatSyncTokenKey(accountId: string | undefined, calendarId: st
 }
 
 /**
- * Save sync metadata for a user, using atomic writes.
+ * Save sync metadata for a user.
  */
 export async function saveSyncMeta(ownerId: string, meta: StoredCalendarSyncMeta): Promise<void> {
+  const mode = getActiveStorageMode();
+
+  if (mode === "mock_firestore" && activeMockStore) {
+    await activeMockStore.setDocument(getFirestoreSyncMetaPath(ownerId), meta as unknown as Record<string, unknown>);
+    return;
+  }
+
+  if (mode === "firestore") {
+    await setFirestoreDocument(getFirestoreSyncMetaPath(ownerId), meta as unknown as Record<string, unknown>);
+    return;
+  }
+
   const filePath = getSyncMetaFilePath(ownerId);
   await atomicWriteFile(filePath, JSON.stringify(meta, null, 2));
 }
@@ -464,9 +670,38 @@ export async function clearSyncToken(
 }
 
 /**
- * Load sync metadata for a user, with legacy migration fallback.
+ * Load sync metadata for a user.
  */
 export async function getSyncMeta(ownerId: string): Promise<StoredCalendarSyncMeta> {
+  const mode = getActiveStorageMode();
+
+  if (mode === "mock_firestore" && activeMockStore) {
+    const doc = await activeMockStore.getDocument(getFirestoreSyncMetaPath(ownerId));
+    if (doc) return doc.data as unknown as StoredCalendarSyncMeta;
+    return { syncTokens: {} };
+  }
+
+  if (mode === "firestore") {
+    try {
+      const doc = await getFirestoreDocument(getFirestoreSyncMetaPath(ownerId));
+      if (doc) return doc.data as unknown as StoredCalendarSyncMeta;
+    } catch (fsErr) {
+      console.warn(`[TokenStore] Firestore sync meta read error for ${sanitizeId(ownerId)}:`, fsErr);
+      throw fsErr;
+    }
+
+    // Check filesystem fallback/migration
+    try {
+      const filePath = getSyncMetaFilePath(ownerId);
+      const raw = await fs.readFile(filePath, "utf8");
+      const meta = JSON.parse(raw) as StoredCalendarSyncMeta;
+      await saveSyncMeta(ownerId, meta).catch(() => {});
+      return meta;
+    } catch {
+      return { syncTokens: {} };
+    }
+  }
+
   const filePath = getSyncMetaFilePath(ownerId);
 
   try {
@@ -484,7 +719,6 @@ export async function getSyncMeta(ownerId: string): Promise<StoredCalendarSyncMe
     const legacyPath = getLegacyMetaFilePath(ownerId);
     const rawLegacy = await fs.readFile(legacyPath, "utf8");
     const meta = JSON.parse(rawLegacy) as StoredCalendarSyncMeta;
-    // Migrate to durable location
     await saveSyncMeta(ownerId, meta).catch(() => {});
     return meta;
   } catch {
@@ -493,10 +727,24 @@ export async function getSyncMeta(ownerId: string): Promise<StoredCalendarSyncMe
 }
 
 /**
- * In-flight sync lock (concurrency / race condition protection across tabs and requests).
+ * In-flight sync lock (concurrency / race condition protection across tabs and distributed serverless instances).
  * Returns true if lock was successfully acquired, false if a sync is already running.
  */
-export async function acquireSyncLock(ownerId: string, timeoutMs = 60000): Promise<boolean> {
+export async function acquireSyncLock(
+  ownerId: string,
+  timeoutMs = 60000,
+  instanceId: string = crypto.randomUUID()
+): Promise<boolean> {
+  const mode = getActiveStorageMode();
+
+  if (mode === "mock_firestore" && activeMockStore) {
+    return await activeMockStore.acquireLock(ownerId, timeoutMs, instanceId);
+  }
+
+  if (mode === "firestore") {
+    return await acquireFirestoreSyncLock(ownerId, timeoutMs, instanceId);
+  }
+
   const now = Date.now();
   const existingLockExpiry = syncLocks.get(ownerId);
 
@@ -511,6 +759,18 @@ export async function acquireSyncLock(ownerId: string, timeoutMs = 60000): Promi
 /**
  * Releases an in-flight sync lock for a user.
  */
-export async function releaseSyncLock(ownerId: string): Promise<void> {
+export async function releaseSyncLock(ownerId: string, instanceId?: string): Promise<void> {
+  const mode = getActiveStorageMode();
+
+  if (mode === "mock_firestore" && activeMockStore) {
+    await activeMockStore.releaseLock(ownerId, instanceId);
+    return;
+  }
+
+  if (mode === "firestore") {
+    await releaseFirestoreSyncLock(ownerId, instanceId);
+    return;
+  }
+
   syncLocks.delete(ownerId);
 }
