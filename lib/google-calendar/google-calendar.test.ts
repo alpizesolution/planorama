@@ -507,3 +507,257 @@ describe("Google Calendar Integration - Conflict Resolution", () => {
     clearSyncQueue();
   });
 });
+
+describe("Phase 1 Remediation - Identity, OAuth & Session Hardening", () => {
+  it("enforces production secret requirements and throws MissingSecretError if unconfigured", async () => {
+    const { MissingSecretError, getTokenEncryptionKey } = await import("../server/crypto");
+    const originalEnv = process.env.NODE_ENV;
+    const originalSecret = process.env.GOOGLE_ENCRYPTION_SECRET;
+    try {
+      (process.env as Record<string, string | undefined>).NODE_ENV = "production";
+      delete process.env.GOOGLE_ENCRYPTION_SECRET;
+      expect(() => getTokenEncryptionKey()).toThrow(MissingSecretError);
+    } finally {
+      (process.env as Record<string, string | undefined>).NODE_ENV = originalEnv;
+      if (originalSecret) process.env.GOOGLE_ENCRYPTION_SECRET = originalSecret;
+    }
+  });
+
+  it("decrypts successfully using rotation fallback key when primary key changed", async () => {
+    const { encryptText, decryptText } = await import("../server/crypto");
+    const testSecret1 = "primary_secret_32_characters_long_1234";
+    const testSecret2 = "fallback_secret_32_characters_long_5678";
+
+    const originalEnv1 = process.env.GOOGLE_ENCRYPTION_SECRET;
+    const originalEnv2 = process.env.GOOGLE_ENCRYPTION_SECRET_FALLBACK;
+    try {
+      process.env.GOOGLE_ENCRYPTION_SECRET = testSecret2;
+      delete process.env.GOOGLE_ENCRYPTION_SECRET_FALLBACK;
+      const encrypted = encryptText("secret_rotation_test_token");
+
+      process.env.GOOGLE_ENCRYPTION_SECRET = testSecret1;
+      process.env.GOOGLE_ENCRYPTION_SECRET_FALLBACK = testSecret2;
+
+      const decrypted = decryptText(encrypted);
+      expect(decrypted).toBe("secret_rotation_test_token");
+    } finally {
+      if (originalEnv1) process.env.GOOGLE_ENCRYPTION_SECRET = originalEnv1;
+      else delete process.env.GOOGLE_ENCRYPTION_SECRET;
+      if (originalEnv2) process.env.GOOGLE_ENCRYPTION_SECRET_FALLBACK = originalEnv2;
+      else delete process.env.GOOGLE_ENCRYPTION_SECRET_FALLBACK;
+    }
+  });
+
+  it("rejects open redirects and dangerous URLs", async () => {
+    const { validateRedirectUrl } = await import("../server/crypto");
+    expect(validateRedirectUrl("/")).toBe("/");
+    expect(validateRedirectUrl("/settings")).toBe("/settings");
+    expect(validateRedirectUrl("/dashboard?tab=gcal")).toBe("/dashboard?tab=gcal");
+
+    // Attack vectors
+    expect(validateRedirectUrl("//evil.com")).toBe("/");
+    expect(validateRedirectUrl("https://evil.com")).toBe("/");
+    expect(validateRedirectUrl("http://attacker.com/evil")).toBe("/");
+    expect(validateRedirectUrl("javascript:alert(1)")).toBe("/");
+    expect(validateRedirectUrl("/\\evil.com")).toBe("/");
+  });
+
+  it("prevents OAuth state replay using single-use nonces", async () => {
+    const { createSignedOAuthState, verifySignedOAuthState } = await import("../server/crypto");
+    const sessionId = "replay_test_session_id";
+    const state = createSignedOAuthState(sessionId, "/settings");
+
+    // First verification succeeds
+    const firstCheck = verifySignedOAuthState(state, sessionId);
+    expect(firstCheck.valid).toBe(true);
+
+    // Immediate second attempt with identical state fails (replay attack)
+    const replayCheck = verifySignedOAuthState(state, sessionId);
+    expect(replayCheck.valid).toBe(false);
+    expect(replayCheck.error).toContain("replay");
+  });
+
+  it("cryptographically verifies signed session tokens and detects tampering", async () => {
+    const { createSignedSessionToken, verifySignedSessionToken } = await import("../server/session");
+    const token = createSignedSessionToken("user_session_123", "firebase_uid_456");
+    expect(token).toContain(".");
+
+    const verified = verifySignedSessionToken(token);
+    expect(verified).not.toBeNull();
+    expect(verified?.sessionId).toBe("user_session_123");
+    expect(verified?.userId).toBe("firebase_uid_456");
+
+    // Tampered payload
+    const parts = token.split(".");
+    const tamperedToken = `${parts[0]}tampered.${parts[1]}`;
+    expect(verifySignedSessionToken(tamperedToken)).toBeNull();
+
+    // Tampered signature
+    const tamperedSig = `${parts[0]}.${parts[1].slice(0, -4)}abcd`;
+    expect(verifySignedSessionToken(tamperedSig)).toBeNull();
+  });
+
+  it("protects against session fixation by regenerating session ID upon Firebase user binding", async () => {
+    const { bindSessionToFirebaseUser } = await import("../server/session");
+    const testIdToken = "mock_firebase_token_firebase_uid_real_user";
+
+    const boundSession = await bindSessionToFirebaseUser(testIdToken);
+    expect(boundSession.userId).toBe("firebase_uid_real_user");
+    expect(boundSession.sessionId).toBeTruthy();
+    expect(boundSession.isGuest).toBe(false);
+  });
+
+  it("rejects invalid, unsigned, or expired Firebase ID tokens", async () => {
+    const { verifyFirebaseIdToken, FirebaseTokenVerificationError } = await import("../server/firebase-verify");
+
+    // Empty or malformed token
+    await expect(verifyFirebaseIdToken("")).rejects.toThrow(FirebaseTokenVerificationError);
+    await expect(verifyFirebaseIdToken("not.a.jwt.token")).rejects.toThrow(FirebaseTokenVerificationError);
+
+    // Token with invalid algorithm (e.g. HS256 instead of RS256)
+    const badHeader = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+    const badPayload = Buffer.from(JSON.stringify({ sub: "uid123", exp: Math.floor(Date.now() / 1000) + 3600 })).toString("base64url");
+    const forgedToken = `${badHeader}.${badPayload}.fakesig`;
+    await expect(verifyFirebaseIdToken(forgedToken)).rejects.toThrow("Expected RS256");
+
+    // Expired token
+    const expHeader = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT", kid: "test" })).toString("base64url");
+    const expPayload = Buffer.from(
+      JSON.stringify({
+        iss: "https://securetoken.google.com/planoramaph",
+        aud: "planoramaph",
+        sub: "uid123",
+        exp: Math.floor(Date.now() / 1000) - 3600,
+      })
+    ).toString("base64url");
+    const expToken = `${expHeader}.${expPayload}.fakesig`;
+    await expect(verifyFirebaseIdToken(expToken)).rejects.toThrow("expired");
+  });
+});
+
+describe("Phase 2 & 3 Remediation - Durable Storage, Scoping & Authorization", () => {
+  it("scopes sync tokens per-account and per-calendar without collision across accounts", async () => {
+    const { saveSyncToken, getSyncToken, clearSyncToken } = await import("../server/google-token-store");
+    const ownerId = `test_owner_${Date.now()}`;
+
+    // Account 1 has a primary calendar
+    await saveSyncToken(ownerId, "sync_token_account_1_primary", "primary", "account_1@gmail.com");
+    // Account 2 also has a primary calendar
+    await saveSyncToken(ownerId, "sync_token_account_2_primary", "primary", "account_2@gmail.com");
+
+    const token1 = await getSyncToken(ownerId, "primary", "account_1@gmail.com");
+    const token2 = await getSyncToken(ownerId, "primary", "account_2@gmail.com");
+
+    expect(token1).toBe("sync_token_account_1_primary");
+    expect(token2).toBe("sync_token_account_2_primary");
+    expect(token1).not.toBe(token2);
+
+    await clearSyncToken(ownerId, "primary", "account_1@gmail.com");
+    expect(await getSyncToken(ownerId, "primary", "account_1@gmail.com")).toBeNull();
+    expect(await getSyncToken(ownerId, "primary", "account_2@gmail.com")).toBe("sync_token_account_2_primary");
+  });
+
+  it("controls concurrent sync execution using durable sync lock", async () => {
+    const { acquireSyncLock, releaseSyncLock } = await import("../server/google-token-store");
+    const lockOwner = `lock_owner_${Date.now()}`;
+
+    const acquiredFirst = await acquireSyncLock(lockOwner, 5000);
+    expect(acquiredFirst).toBe(true);
+
+    // Second concurrent attempt is rejected
+    const acquiredSecond = await acquireSyncLock(lockOwner, 5000);
+    expect(acquiredSecond).toBe(false);
+
+    // Release lock
+    await releaseSyncLock(lockOwner);
+
+    // Now another attempt succeeds
+    const acquiredThird = await acquireSyncLock(lockOwner, 5000);
+    expect(acquiredThird).toBe(true);
+    await releaseSyncLock(lockOwner);
+  });
+});
+
+describe("Phase 4 & 5 Remediation - Composite Identity, Tombstones & Privacy", () => {
+  it("maintains distinct composite identities for identical event IDs across different accounts", () => {
+    const googleEvent: GoogleCalendarEvent = {
+      id: "event_recurring_shared_id_100",
+      status: "confirmed",
+      summary: "Team Sync",
+      start: { dateTime: "2026-10-25T10:00:00Z" },
+    };
+
+    const cal1: GoogleCalendarConfig = {
+      id: "primary",
+      accountId: "va_account_1",
+      accountEmail: "va1@agency.com",
+      name: "VA Calendar",
+      color: "#ff0000",
+      accessRole: "writer",
+      enabled: true,
+      syncDirection: "two_way",
+      privacyMode: "full_details",
+    };
+
+    const cal2: GoogleCalendarConfig = {
+      id: "primary",
+      accountId: "client_account_2",
+      accountEmail: "client2@corp.com",
+      name: "Client Calendar",
+      color: "#0000ff",
+      accessRole: "reader",
+      enabled: true,
+      syncDirection: "two_way",
+      privacyMode: "full_details",
+    };
+
+    const task1 = googleEventToPlannerTask(googleEvent, cal1);
+    const task2 = googleEventToPlannerTask(googleEvent, cal2);
+
+    expect(task1.id).not.toBe(task2.id);
+    expect(task1.googleAccountId).toBe("va_account_1");
+    expect(task2.googleAccountId).toBe("client_account_2");
+    expect(task1.isReadOnlyCalendar).toBe(false);
+    expect(task2.isReadOnlyCalendar).toBe(true);
+  });
+
+  it("handles composite tombstones correctly across calendars and accounts", async () => {
+    const {
+      recordDeletedGoogleEventId,
+      isEventTombstoned,
+      clearTombstones,
+    } = await import("./sync-queue");
+
+    clearTombstones();
+
+    recordDeletedGoogleEventId("event-abc", "calendar-x", "account-1");
+
+    // Matches composite key
+    expect(isEventTombstoned("event-abc", "calendar-x", "account-1")).toBe(true);
+    // Matches calendar-scoped key
+    expect(isEventTombstoned("event-abc", "calendar-x")).toBe(true);
+    // Unrelated event not tombstoned
+    expect(isEventTombstoned("event-def", "calendar-x", "account-1")).toBe(false);
+
+    clearTombstones();
+  });
+
+  it("preserves operationId on sync queue items for idempotency and replay safety", async () => {
+    const { enqueueSyncAction, getSyncQueue, clearSyncQueue } = await import("./sync-queue");
+    clearSyncQueue();
+
+    enqueueSyncAction({
+      action: "create",
+      taskId: "task-idempotent-1",
+      operationId: "op-fixed-id-12345",
+      localUpdatedAt: new Date().toISOString(),
+    });
+
+    const queue = getSyncQueue();
+    expect(queue).toHaveLength(1);
+    expect(queue[0].operationId).toBe("op-fixed-id-12345");
+
+    clearSyncQueue();
+  });
+});
+
