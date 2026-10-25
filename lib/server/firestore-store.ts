@@ -302,6 +302,15 @@ async function fetchWithFirestoreAuth(
       }
     }
 
+    if (res.status >= 500) {
+      const errText = await res.text().catch(() => "");
+      const err = new StorageUnavailableError(
+        `Firestore server error ${res.status} for ${docPath}: ${errText}`
+      );
+      (err as { status?: number }).status = res.status;
+      throw err;
+    }
+
     return res;
   });
 }
