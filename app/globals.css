@@ -6602,7 +6602,8 @@ html, body {
 }
 
 .month-workspace-container,
-.week-workspace-container {
+.week-workspace-container,
+.day-workspace-container {
   display: flex;
   gap: 20px;
   align-items: flex-start;
@@ -6612,12 +6613,619 @@ html, body {
   position: relative;
 }
 
-.week-workspace-main {
+.week-workspace-main,
+.day-workspace-main {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
   width: 100%;
+}
+
+/* ==========================================================================
+   DAY VIEW STYLING (Google Calendar Architecture + Neo-Brutalist Visuals)
+   ========================================================================== */
+
+.day-view-workspace {
+  background: var(--surface, #ffffff);
+  border: 2.5px solid var(--ink, #1e1e24);
+  border-radius: 14px;
+  box-shadow: 4px 4px 0 var(--shadow, #1e1e24);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+}
+
+/* 1. Header Toolbar */
+.day-view-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 20px;
+  border-bottom: 2.5px solid var(--ink, #1e1e24);
+  background: #ffffff;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.day-header-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.day-mobile-sidebar-btn {
+  display: none;
+}
+
+.day-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.day-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.day-main-heading {
+  font-size: 20px;
+  font-weight: 900;
+  color: var(--ink, #1e1e24);
+  margin: 0;
+  letter-spacing: -0.02em;
+}
+
+.day-today-tag {
+  font-size: 11px;
+  font-weight: 800;
+  background: #ffe14d;
+  color: var(--ink, #1e1e24);
+  border: 1.5px solid var(--ink, #1e1e24);
+  border-radius: 6px;
+  padding: 2px 8px;
+  box-shadow: 1px 1px 0 var(--shadow, #1e1e24);
+}
+
+.day-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.day-nav-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.day-nav-controls .today-btn.is-active-today {
+  background: #ffe14d;
+  color: var(--ink, #1e1e24);
+  font-weight: 800;
+}
+
+.day-picker-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.day-picker-input {
+  background: #fff;
+  border: 2px solid var(--ink, #1e1e24);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink, #1e1e24);
+  padding: 5px 28px 5px 10px;
+  cursor: pointer;
+  outline: none;
+  box-shadow: 2px 2px 0 var(--shadow, #1e1e24);
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+
+.day-picker-input:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 3px 0 var(--shadow, #1e1e24);
+}
+
+.day-picker-icon {
+  position: absolute;
+  right: 8px;
+  pointer-events: none;
+  color: var(--ink, #1e1e24);
+  display: flex;
+}
+
+/* Day View Segmented Switcher */
+.day-header-view-switcher {
+  display: inline-flex;
+  background: #f1f0ea;
+  border: 2px solid var(--ink, #1e1e24);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.day-view-tab-btn {
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink, #1e1e24);
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.day-view-tab-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.day-view-tab-btn.is-active {
+  background: #ffffff;
+  border: 1.5px solid var(--ink, #1e1e24);
+  font-weight: 800;
+  box-shadow: 1px 1px 0 var(--shadow, #1e1e24);
+}
+
+/* Day View Header Dual Action Buttons */
+.day-header-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.day-add-event-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--primary, #ff3d8b);
+  color: #ffffff;
+  border: 2px solid var(--ink, #1e1e24);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 6px 14px;
+  cursor: pointer;
+  box-shadow: 2px 2px 0 var(--shadow, #1e1e24);
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+
+.day-add-event-btn:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 3px 0 var(--shadow, #1e1e24);
+}
+
+.day-add-task-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #ffe14d;
+  color: var(--ink, #1e1e24);
+  border: 2px solid var(--ink, #1e1e24);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 6px 14px;
+  cursor: pointer;
+  box-shadow: 2px 2px 0 var(--shadow, #1e1e24);
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+
+.day-add-task-btn:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 3px 0 var(--shadow, #1e1e24);
+}
+
+/* 2. All-Day Events & Daily Tasks Section */
+.day-allday-container {
+  display: flex;
+  border-bottom: 2px solid var(--ink, #1e1e24);
+  background: #faf8f5;
+  min-height: 48px;
+}
+
+.day-allday-label-col {
+  width: 72px;
+  min-width: 72px;
+  padding: 10px 8px;
+  border-right: 1.5px solid #e2ded5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  background: #faf8f5;
+}
+
+.allday-label-text {
+  font-size: 11px;
+  font-weight: 800;
+  color: #555555;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.allday-count-badge {
+  font-size: 10px;
+  font-weight: 800;
+  background: #e2ded5;
+  color: var(--ink, #1e1e24);
+  border-radius: 10px;
+  padding: 1px 6px;
+}
+
+.day-allday-content-col {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 14px;
+  display: flex;
+  align-items: center;
+}
+
+.allday-empty-placeholder {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1.5px dashed #cccccc;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #777777;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.allday-empty-placeholder:hover {
+  border-color: var(--ink, #1e1e24);
+  color: var(--ink, #1e1e24);
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.day-allday-items-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+}
+
+.day-allday-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1.5px solid var(--ink, #1e1e24);
+  border-left-width: 4.5px;
+  background: #ffffff;
+  box-shadow: 1.5px 1.5px 0 var(--shadow, #1e1e24);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink, #1e1e24);
+  cursor: pointer;
+  transition: transform 0.1s, box-shadow 0.1s;
+  max-width: 100%;
+}
+
+.day-allday-pill:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 2.5px 2.5px 0 var(--shadow, #1e1e24);
+}
+
+.day-allday-pill.is-completed {
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+
+.allday-pill-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.allday-pill-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.allday-pill-source-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(0, 0, 0, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.allday-pill-local-badge {
+  font-size: 10px;
+  font-weight: 700;
+  background: #ffe14d;
+  color: var(--ink, #1e1e24);
+  padding: 1px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.allday-lock-icon {
+  color: #666666;
+  margin-left: 2px;
+}
+
+/* 3. Daily Hourly Timeline Layout */
+.day-timeline-scroll-container {
+  position: relative;
+  height: 660px;
+  max-height: calc(100vh - 240px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: #ffffff;
+}
+
+.day-timeline-layout {
+  display: flex;
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.day-time-axis {
+  width: 72px;
+  min-width: 72px;
+  border-right: 1.5px solid #e2ded5;
+  user-select: none;
+  background: #faf8f5;
+}
+
+.time-axis-cell {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding-right: 8px;
+  box-sizing: border-box;
+}
+
+.time-axis-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #777777;
+  letter-spacing: -0.02em;
+  transform: translateY(-8px);
+}
+
+.day-timeline-canvas {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  background-color: #ffffff;
+  cursor: crosshair;
+}
+
+.day-timeline-hour-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid #ebe8df;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.day-timeline-half-hour {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 1px dashed #f5f4ef;
+  pointer-events: none;
+}
+
+/* Red Current Time Line Indicator */
+.day-current-time-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #ea4335;
+  z-index: 20;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+}
+
+.current-time-dot {
+  position: absolute;
+  left: -5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ea4335;
+  box-shadow: 0 0 4px rgba(234, 67, 53, 0.6);
+}
+
+.current-time-badge {
+  position: absolute;
+  left: 10px;
+  top: -10px;
+  background: #ea4335;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 4px;
+  box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.2);
+}
+
+/* Positioned Event and Task Cards */
+.day-timeline-event {
+  position: absolute;
+  border-radius: 8px;
+  border: 2px solid var(--ink, #1e1e24);
+  border-left-width: 5px;
+  padding: 6px 10px;
+  box-sizing: border-box;
+  cursor: pointer;
+  box-shadow: 2px 2px 0 var(--shadow, #1e1e24);
+  z-index: 10;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  transition: transform 0.1s, box-shadow 0.1s, z-index 0.1s;
+}
+
+.day-timeline-event:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0 var(--shadow, #1e1e24);
+  z-index: 30;
+}
+
+.day-timeline-event.is-completed {
+  opacity: 0.65;
+}
+
+.timeline-event-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.timeline-event-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.event-pin {
+  font-size: 11px;
+}
+
+.timeline-event-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--ink, #1e1e24);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-event-lock {
+  color: #555555;
+  flex-shrink: 0;
+}
+
+.timeline-event-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  font-weight: 700;
+  color: #444444;
+}
+
+.timeline-event-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.timeline-event-source {
+  font-weight: 800;
+  font-size: 10px;
+  background: rgba(0, 0, 0, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.timeline-event-local-chip {
+  font-size: 10px;
+  font-weight: 800;
+  background: #ffe14d;
+  color: var(--ink, #1e1e24);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.timeline-event-location {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: #666666;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 4. Footer Summary */
+.day-view-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-top: 2px solid var(--ink, #1e1e24);
+  background: #faf8f5;
+  font-size: 12px;
+  font-weight: 700;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.day-footer-legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink, #1e1e24);
+}
+
+.legend-chip-box {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--ink, #1e1e24);
+  border-radius: 3px;
+}
+
+.legend-chip-box.today-chip {
+  background: #ea4335;
+}
+
+.legend-chip-box.active-count-chip {
+  background: #ffe14d;
+}
+
+.legend-chip-box.items-chip {
+  background: #ff3d8b;
+}
+
+.day-footer-hint {
+  color: #777777;
+  font-size: 11px;
 }
 
 .weekly-planner-header-title-wrap {
@@ -7850,13 +8458,46 @@ html, body {
 /* Mobile (<= 768px) */
 @media (max-width: 768px) {
   .month-workspace-container,
-  .week-workspace-container {
+  .week-workspace-container,
+  .day-workspace-container {
     flex-direction: column;
     gap: 0;
   }
 
-  .mobile-sidebar-toggle-btn {
+  .mobile-sidebar-toggle-btn,
+  .day-mobile-sidebar-btn {
     display: flex;
+  }
+
+  .day-view-header {
+    padding: 10px 12px;
+    gap: 10px;
+  }
+
+  .day-main-heading {
+    font-size: 16px;
+  }
+
+  .day-header-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .day-timeline-scroll-container {
+    height: 520px;
+  }
+
+  .day-time-axis {
+    width: 58px;
+    min-width: 58px;
+  }
+
+  .time-axis-label {
+    font-size: 10px;
+  }
+
+  .day-footer-hint {
+    display: none;
   }
 
   /* Slide-in Mobile Off-Canvas Drawer */

@@ -48,6 +48,7 @@ import {
   resolveDashboardWidgets,
 } from "@/lib/dashboard/types";
 import { CalendarSidebar } from "@/app/components/calendar/calendar-sidebar";
+import { DayView } from "@/app/components/calendar/day-view";
 import { MonthView } from "@/app/components/calendar/month-view";
 import { GoogleCalendarSettings } from "@/app/components/google-calendar-settings";
 import { UserProfileButton } from "@/app/components/auth/user-profile-button";
@@ -68,15 +69,16 @@ import { DEFAULT_GOOGLE_SYNC_SETTINGS } from "@/lib/google-calendar/types";
 type TaskTemplate = { id: string; name: string; title: string; notes: string; priority: PlannerTask["priority"]; recurrence: PlannerTask["recurrence"] };
 type TaskLabel = { id: string; name: string };
 type TaskProject = { id: string; name: string };
-type AppView = "dashboard" | "month" | "year" | "yearline" | "agenda" | "week" | "kanban";
+type AppView = "dashboard" | "day" | "month" | "year" | "yearline" | "agenda" | "week" | "kanban";
 
 const NAV_VIEWS: { id: AppView; label: string }[] = [
   { id: "dashboard", label: "Dashboard" },
+  { id: "day", label: "Day" },
+  { id: "week", label: "Week" },
   { id: "month", label: "Month" },
   { id: "year", label: "Year" },
   { id: "yearline", label: "Yearline" },
   { id: "agenda", label: "Agenda" },
-  { id: "week", label: "Week" },
   { id: "kanban", label: "Board" },
 ];
 
@@ -1819,11 +1821,45 @@ export default function HomePage() {
   const shownDate = new Date(today.getFullYear(), today.getMonth() + monthOffset, 1);
   const shownYear = today.getFullYear() + yearOffset;
 
-  // Mini-calendar date for sidebar (in week view, follows weekly anchor date + month offset)
+  // Mini-calendar date for sidebar (in week/day view, follows active anchor or selected date + month offset)
   const miniCalendarShownDate = useMemo(() => {
-    const base = view === "week" ? weeklyAnchorDate : today;
+    let base = today;
+    if (view === "week") {
+      base = weeklyAnchorDate;
+    } else if (view === "day") {
+      if (selectedDate) {
+        const [y, m, d] = selectedDate.split("-").map(Number);
+        base = new Date(y, m - 1, d);
+      } else {
+        base = today;
+      }
+    }
     return new Date(base.getFullYear(), base.getMonth() + monthOffset, 1);
-  }, [view, weeklyAnchorDate, today, monthOffset]);
+  }, [view, weeklyAnchorDate, selectedDate, today, monthOffset]);
+
+  // Day view computed current date
+  const currentDayDate = useMemo(() => {
+    if (!selectedDate) return today;
+    const [y, m, d] = selectedDate.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  }, [selectedDate, today]);
+
+  const handleNavigateDay = (offset: number) => {
+    const [y, m, d] = (selectedDate || todayKey).split("-").map(Number);
+    const nextDate = new Date(y, m - 1, d + offset);
+    const nextKey = toDateKey(nextDate);
+    setSelectedDate(nextKey);
+    setNewDueDate(nextKey);
+    setWeeklyAnchorDate(nextDate);
+    setMonthOffset(0);
+  };
+
+  const handleResetDayToToday = () => {
+    setSelectedDate(todayKey);
+    setNewDueDate(todayKey);
+    setWeeklyAnchorDate(today);
+    setMonthOffset(0);
+  };
 
   // Week view computed values
   const weekDays = useMemo(() => {
@@ -4181,6 +4217,70 @@ export default function HomePage() {
         {view === "yearline" && (
           <div className="content-single">
             {renderYearlineView()}
+          </div>
+        )}
+
+        {/* ===== DAY VIEW ===== */}
+        {view === "day" && (
+          <div className="month-workspace-container day-workspace-container">
+            <CalendarSidebar
+              currentShownDate={miniCalendarShownDate}
+              selectedDate={selectedDate || todayKey}
+              onSelectDate={(dateKey) => {
+                setSelectedDate(dateKey);
+                setNewDueDate(dateKey || "");
+                if (dateKey) {
+                  const [y, m, d] = dateKey.split("-").map(Number);
+                  setWeeklyAnchorDate(new Date(y, m - 1, d));
+                }
+              }}
+              onNavigateMonth={(offset) => setMonthOffset((curr) => curr + offset)}
+              weekStartsOn={preferences.weekStartsOn}
+              tasks={tasks}
+              onAddEvent={(dateKey) => openAddTask({ date: dateKey || selectedDate || todayKey, time: "09:00", status: "open" })}
+              onAddTask={(dateKey) => openAddTask({ date: dateKey || selectedDate || todayKey, status: "open" })}
+              localCalendarEnabled={localCalendarEnabled}
+              onToggleLocalCalendar={() => setLocalCalendarEnabled((prev) => !prev)}
+              googleStatus={googleStatus}
+              calendarConfigs={activeCalendarConfigs}
+              onToggleCalendar={handleToggleCalendar}
+              onConnectGoogle={handleConnectGoogle}
+              onSyncGoogle={handleSyncGoogle}
+              isSyncingGoogle={isSyncingGoogle}
+              isOpenOnMobile={mobileSidebarOpen}
+              onCloseMobile={() => setMobileSidebarOpen(false)}
+            />
+            <div className="day-workspace-main">
+              <DayView
+                currentDate={currentDayDate}
+                currentDateKey={selectedDate || todayKey}
+                today={today}
+                todayKey={todayKey}
+                onNavigateDay={handleNavigateDay}
+                onResetToToday={handleResetDayToToday}
+                onSelectDate={(dateKey) => {
+                  setSelectedDate(dateKey);
+                  setNewDueDate(dateKey);
+                  const [y, m, d] = dateKey.split("-").map(Number);
+                  setWeeklyAnchorDate(new Date(y, m - 1, d));
+                }}
+                resolvedTheme={resolvedTheme}
+                tasks={displayedTasks}
+                allCalendarConfigs={activeCalendarConfigs}
+                onAddTask={(options) =>
+                  openAddTask({
+                    date: options?.date || selectedDate || todayKey,
+                    time: options?.time,
+                    status: options?.status || "open",
+                  })
+                }
+                onOpenTaskDetail={openTaskDetail}
+                onToggleMobileSidebar={() => setMobileSidebarOpen((prev) => !prev)}
+                activeCalendarCount={activeCalendarCount}
+                currentView={view}
+                onSwitchView={(v) => setView(v)}
+              />
+            </div>
           </div>
         )}
 

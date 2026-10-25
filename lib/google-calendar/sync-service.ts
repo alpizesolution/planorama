@@ -76,6 +76,14 @@ export function googleEventToPlannerTask(
   const isReadOnly = calendar.accessRole === "reader" || calendar.accessRole === "freeBusyReader";
   const isAvailabilityOnly = calendar.privacyMode === "availability_only" || event.visibility === "private";
 
+  let durationMinutes: number | undefined;
+  if (event.start?.dateTime && event.end?.dateTime) {
+    const startMs = new Date(event.start.dateTime).getTime();
+    const endMs = new Date(event.end.dateTime).getTime();
+    const diff = Math.round((endMs - startMs) / (60 * 1000));
+    if (diff > 0) durationMinutes = diff;
+  }
+
   let title = event.summary?.trim() || "(No title)";
   let notes = event.description?.trim() || "";
   let location: string | undefined = event.location?.trim() || undefined;
@@ -128,6 +136,8 @@ export function googleEventToPlannerTask(
     lastSyncedAt: now,
     syncStatus: "synced",
     recurringEventId: event.recurringEventId,
+    durationMinutes: durationMinutes ?? existingTask?.durationMinutes,
+    isAllDay: Boolean(event.start?.date && !event.start?.dateTime) || existingTask?.isAllDay,
   };
 }
 

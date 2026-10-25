@@ -47,6 +47,8 @@ export type PlannerTask = {
   lastSyncedAt?: string;
   syncStatus?: "synced" | "pending" | "conflict" | "error";
   recurringEventId?: string;
+  durationMinutes?: number;
+  isAllDay?: boolean;
 };
 
 export type NewPlannerTask = Pick<PlannerTask, "title"> & Partial<Omit<PlannerTask, "id" | "title" | "createdAt" | "updatedAt">>;
