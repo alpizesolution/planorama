@@ -6,15 +6,23 @@ import {
   CaretRight,
   Plus,
   Lock,
-  SidebarSimple,
   CalendarBlank,
   Clock,
   MapPin,
   Calendar,
+  CheckSquare,
 } from "@phosphor-icons/react";
 import type { PlannerTask } from "@/lib/schedule/types";
 import type { GoogleCalendarConfig } from "@/lib/google-calendar/types";
 import { type ResolvedCalendarTheme } from "@/lib/calendar/calendar-themes";
+import {
+  getItemType,
+  type ItemColorPreferences,
+  DEFAULT_ITEM_COLORS,
+  getItemTileStyle,
+  DEFAULT_ITEM_STYLES,
+  type ItemStylesPreferences,
+} from "@/lib/calendar/item-color";
 
 import {
   layoutDayEvents,
@@ -24,7 +32,7 @@ import {
   type PositionedDayEvent,
 } from "@/lib/calendar/day-layout";
 
-export type DayAppView = "dashboard" | "day" | "month" | "year" | "yearline" | "agenda" | "week" | "kanban";
+export type DayAppView = "dashboard" | "day" | "month" | "year" | "yearline" | "agenda" | "week" | "workWeek" | "kanban" | "settings";
 
 export interface DayViewProps {
   currentDate: Date;
@@ -37,10 +45,12 @@ export interface DayViewProps {
   resolvedTheme: ResolvedCalendarTheme;
   tasks: PlannerTask[]; // filtered by active calendars
   allCalendarConfigs: Record<string, GoogleCalendarConfig>;
+  itemColors?: ItemColorPreferences;
+  itemStyles?: ItemStylesPreferences;
   onAddTask: (options?: { date?: string | null; time?: string | null; status?: PlannerTask["status"] }) => void;
   onOpenTaskDetail: (task: PlannerTask) => void;
-  onToggleMobileSidebar: () => void;
-  activeCalendarCount: number;
+  onToggleMobileSidebar?: () => void;
+  activeCalendarCount?: number;
   currentView?: DayAppView;
   onSwitchView?: (view: DayAppView) => void;
 }
@@ -56,12 +66,11 @@ export function DayView({
   onSelectDate,
   tasks,
   allCalendarConfigs,
+  itemColors: _itemColors = DEFAULT_ITEM_COLORS,
+  itemStyles = DEFAULT_ITEM_STYLES,
   onAddTask,
   onOpenTaskDetail,
-  onToggleMobileSidebar,
-  activeCalendarCount,
-  currentView = "day",
-  onSwitchView,
+  activeCalendarCount = 0,
 }: DayViewProps) {
   const isToday = currentDateKey === todayKey;
 
@@ -154,16 +163,6 @@ export function DayView({
       {/* 1. Header with date navigation, picker, and actions */}
       <header className="day-view-header">
         <div className="day-header-left">
-          <button
-            type="button"
-            className="mobile-sidebar-toggle-btn day-mobile-sidebar-btn"
-            onClick={onToggleMobileSidebar}
-            aria-label="Toggle calendar sidebar"
-          >
-            <SidebarSimple size={18} weight="bold" />
-            <span>Calendars</span>
-          </button>
-
           <div className="day-title-group">
             <span className="section-kicker">DAILY WORKSPACE</span>
             <div className="day-title-row">
@@ -220,61 +219,6 @@ export function DayView({
               <CalendarBlank size={14} weight="bold" />
             </span>
           </div>
-
-          {/* View switcher for Day, Week, Month */}
-          {onSwitchView && (
-            <div className="day-header-view-switcher" role="tablist" aria-label="Switch view">
-              <button
-                type="button"
-                className={`day-view-tab-btn ${currentView === "day" ? "is-active" : ""}`}
-                onClick={() => onSwitchView("day")}
-                role="tab"
-                aria-selected={currentView === "day"}
-              >
-                Day
-              </button>
-              <button
-                type="button"
-                className={`day-view-tab-btn ${currentView === "week" ? "is-active" : ""}`}
-                onClick={() => onSwitchView("week")}
-                role="tab"
-                aria-selected={currentView === "week"}
-              >
-                Week
-              </button>
-              <button
-                type="button"
-                className={`day-view-tab-btn ${currentView === "month" ? "is-active" : ""}`}
-                onClick={() => onSwitchView("month")}
-                role="tab"
-                aria-selected={currentView === "month"}
-              >
-                Month
-              </button>
-            </div>
-          )}
-
-          {/* Quick Add Event & Add Task Actions */}
-          <div className="day-header-actions-group">
-            <button
-              type="button"
-              className="day-add-event-btn"
-              onClick={() => onAddTask({ date: currentDateKey, time: "09:00", status: "open" })}
-              title="Add scheduled event with prefilled time"
-            >
-              <Plus size={15} weight="bold" />
-              <span>Add Event</span>
-            </button>
-            <button
-              type="button"
-              className="day-add-task-btn"
-              onClick={() => onAddTask({ date: currentDateKey, status: "open" })}
-              title="Add daily task"
-            >
-              <Plus size={15} weight="bold" />
-              <span>Add Task</span>
-            </button>
-          </div>
         </div>
       </header>
 
@@ -298,16 +242,18 @@ export function DayView({
             <div className="day-allday-items-grid">
               {allDayItems.map((item) => {
                 const calConfig = item.googleCalendarId ? allCalendarConfigs[item.googleCalendarId] : undefined;
-                const calColor = item.googleCalendarColor || calConfig?.color || (item.isGoogleEvent ? "#4285F4" : "#10b981");
+                const tileStyle = getItemTileStyle(item, itemStyles, allCalendarConfigs);
+                const calColor = tileStyle.primaryColor;
+                const itemType = getItemType(item);
+                const isAppointment = itemType === "appointment";
                 const isReadOnly = Boolean(item.isReadOnlyCalendar || calConfig?.accessRole === "reader" || calConfig?.accessRole === "freeBusyReader");
 
                 return (
                   <div
                     key={item.id}
-                    className={`day-allday-pill ${item.status === "completed" ? "is-completed" : ""}`}
+                    className={`day-allday-pill ${tileStyle.className} ${item.status === "completed" ? "is-completed" : ""}`}
                     style={{
-                      borderLeftColor: calColor,
-                      backgroundColor: `${calColor}14`,
+                      ...tileStyle.style,
                     }}
                     onClick={() => onOpenTaskDetail(item)}
                     role="button"
@@ -321,7 +267,7 @@ export function DayView({
                   >
                     <span
                       className="allday-pill-dot"
-                      style={{ backgroundColor: calColor }}
+                      style={{ backgroundColor: tileStyle.indicatorColor }}
                     />
                     <span className="allday-pill-title">{item.title}</span>
                     {item.isGoogleEvent ? (
@@ -330,8 +276,21 @@ export function DayView({
                         <span>{item.googleCalendarName || "Google"}</span>
                         {isReadOnly && <Lock size={10} weight="bold" className="allday-lock-icon" />}
                       </span>
+                    ) : isAppointment ? (
+                      <span className="allday-pill-local-badge" style={{ backgroundColor: `${calColor}24`, color: tileStyle.indicatorColor }}>
+                        <Clock size={10} weight="bold" />
+                        <span>Schedule</span>
+                      </span>
+                    ) : itemType === "event" ? (
+                      <span className="allday-pill-local-badge" style={{ backgroundColor: `${calColor}24`, color: tileStyle.indicatorColor }}>
+                        <CalendarBlank size={10} weight="bold" />
+                        <span>Event</span>
+                      </span>
                     ) : (
-                      <span className="allday-pill-local-badge">Task</span>
+                      <span className="allday-pill-local-badge" style={{ backgroundColor: `${calColor}24`, color: tileStyle.indicatorColor }}>
+                        <CheckSquare size={10} weight="bold" />
+                        <span>Task</span>
+                      </span>
                     )}
                   </div>
                 );
@@ -396,8 +355,10 @@ export function DayView({
 
             {/* Positioned Event and Task Cards */}
             {positionedItems.map(({ task, startMinutes, durationMinutes, column, totalColumns, endMinutes }) => {
+              const itemType = getItemType(task);
+              const isAppointment = itemType === "appointment";
               const calConfig = task.googleCalendarId ? allCalendarConfigs[task.googleCalendarId] : undefined;
-              const calColor = task.googleCalendarColor || calConfig?.color || (task.isGoogleEvent ? "#0284c7" : "#10b981");
+              const tileStyle = getItemTileStyle(task, itemStyles, allCalendarConfigs);
               const isReadOnly = Boolean(task.isReadOnlyCalendar || calConfig?.accessRole === "reader" || calConfig?.accessRole === "freeBusyReader");
 
               const topPx = (startMinutes / 60) * HOUR_HEIGHT;
@@ -408,14 +369,13 @@ export function DayView({
               return (
                 <div
                   key={task.id}
-                  className={`day-timeline-event ${task.status === "completed" ? "is-completed" : ""} ${task.isPinned ? "is-pinned" : ""}`}
+                  className={`day-timeline-event ${tileStyle.className} ${task.status === "completed" ? "is-completed" : ""} ${task.isPinned ? "is-pinned" : ""}`}
                   style={{
                     top: `${topPx}px`,
                     height: `${heightPx}px`,
                     left: `calc(${leftPercent}% + 2px)`,
                     width: `calc(${widthPercent}% - 4px)`,
-                    borderLeftColor: calColor,
-                    backgroundColor: `${calColor}14`,
+                    ...tileStyle.style,
                   }}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -435,6 +395,13 @@ export function DayView({
                   <div className="timeline-event-header">
                     <div className="timeline-event-title-wrap">
                       {task.isPinned && <span className="event-pin" title="Pinned">📌</span>}
+                      {isAppointment ? (
+                        <Clock size={12} weight="bold" style={{ color: tileStyle.indicatorColor, flexShrink: 0, marginRight: 3 }} />
+                      ) : itemType === "event" ? (
+                        <CalendarBlank size={12} weight="bold" style={{ color: tileStyle.indicatorColor, flexShrink: 0, marginRight: 3 }} />
+                      ) : (
+                        <CheckSquare size={12} weight="bold" style={{ color: tileStyle.indicatorColor, flexShrink: 0, marginRight: 3 }} />
+                      )}
                       <span className="timeline-event-title">{task.title}</span>
                     </div>
                     {isReadOnly && (
@@ -451,11 +418,15 @@ export function DayView({
                     </span>
 
                     {task.isGoogleEvent ? (
-                      <span className="timeline-event-source" style={{ color: calColor }}>
+                      <span className="timeline-event-source" style={{ color: tileStyle.indicatorColor }}>
                         {task.googleCalendarName || "Google"}
                       </span>
+                    ) : isAppointment ? (
+                      <span className="timeline-event-local-chip" style={{ color: tileStyle.indicatorColor }}>Schedule</span>
+                    ) : itemType === "event" ? (
+                      <span className="timeline-event-local-chip" style={{ color: tileStyle.indicatorColor }}>Event</span>
                     ) : (
-                      <span className="timeline-event-local-chip">Task</span>
+                      <span className="timeline-event-local-chip" style={{ color: tileStyle.indicatorColor }}>Task</span>
                     )}
 
                     {task.location && (

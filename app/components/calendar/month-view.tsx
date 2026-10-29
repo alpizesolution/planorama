@@ -4,13 +4,23 @@ import { useMemo } from "react";
 import {
   CaretLeft,
   CaretRight,
-  List,
   Plus,
   Lock,
+  CalendarBlank,
+  Clock,
+  CheckSquare,
 } from "@phosphor-icons/react";
 import type { PlannerTask } from "@/lib/schedule/types";
 import type { GoogleCalendarConfig } from "@/lib/google-calendar/types";
 import { getMonthColor, type ResolvedCalendarTheme } from "@/lib/calendar/calendar-themes";
+import {
+  getItemType,
+  type ItemColorPreferences,
+  DEFAULT_ITEM_COLORS,
+  getItemTileStyle,
+  DEFAULT_ITEM_STYLES,
+  type ItemStylesPreferences,
+} from "@/lib/calendar/item-color";
 
 interface MonthViewProps {
   shownDate: Date;
@@ -24,10 +34,12 @@ interface MonthViewProps {
   resolvedTheme: ResolvedCalendarTheme;
   tasks: PlannerTask[]; // filtered by active calendars
   allCalendarConfigs: Record<string, GoogleCalendarConfig>;
+  itemColors?: ItemColorPreferences;
+  itemStyles?: ItemStylesPreferences;
   onAddTask: (options?: { date?: string | null; time?: string | null; status?: PlannerTask["status"] }) => void;
   onOpenTaskDetail: (task: PlannerTask) => void;
-  onToggleMobileSidebar: () => void;
-  activeCalendarCount: number;
+  onToggleMobileSidebar?: () => void;
+  activeCalendarCount?: number;
 }
 
 export function MonthView({
@@ -42,10 +54,11 @@ export function MonthView({
   resolvedTheme,
   tasks,
   allCalendarConfigs,
+  itemColors: _itemColors = DEFAULT_ITEM_COLORS,
+  itemStyles = DEFAULT_ITEM_STYLES,
   onAddTask,
   onOpenTaskDetail,
-  onToggleMobileSidebar,
-  activeCalendarCount,
+  activeCalendarCount = 0,
 }: MonthViewProps) {
   // Calendar days grid calculation
   const calendarDays = useMemo(() => {
@@ -121,21 +134,6 @@ export function MonthView({
       {/* 1. Month Header Toolbar */}
       <div className="month-toolbar">
         <div className="toolbar-left">
-          {/* Mobile Sidebar Drawer Toggle Button */}
-          <button
-            type="button"
-            className="mobile-sidebar-toggle-btn"
-            onClick={onToggleMobileSidebar}
-            aria-label="Toggle calendar sidebar"
-            title="Toggle calendar sidebar"
-          >
-            <List size={18} weight="bold" />
-            <span className="sidebar-toggle-label">Calendars</span>
-            {activeCalendarCount > 0 && (
-              <span className="sidebar-toggle-badge">{activeCalendarCount}</span>
-            )}
-          </button>
-
           {/* Month & Year Badge */}
           <div className="month-heading-group">
             <span className="month-kicker">MONTH WORKSPACE</span>
@@ -189,15 +187,6 @@ export function MonthView({
             <span className="indicator-dot" />
             <span>{activeCalendarCount} calendars</span>
           </div>
-
-          <button
-            type="button"
-            className="month-add-event-btn"
-            onClick={() => onAddTask({ date: selectedDate || todayKey, status: "open" })}
-          >
-            <Plus size={16} weight="bold" />
-            <span>Add Event</span>
-          </button>
         </div>
       </div>
 
@@ -227,9 +216,10 @@ export function MonthView({
           }
 
           const isToday =
-            item.day === today.getDate() &&
-            shownDate.getMonth() === today.getMonth() &&
-            shownDate.getFullYear() === today.getFullYear();
+            item.dateKey === todayKey ||
+            (item.day === today.getDate() &&
+              shownDate.getMonth() === today.getMonth() &&
+              shownDate.getFullYear() === today.getFullYear());
           const isSelected = selectedDate === item.dateKey;
           const dayDate = new Date(shownDate.getFullYear(), shownDate.getMonth(), item.day);
           const isWeekend = dayDate.getDay() === 0 || dayDate.getDay() === 6;
@@ -298,21 +288,25 @@ export function MonthView({
 
               {/* Mobile Activity Dots (<=650px) */}
               <div className="day-cell-mobile-indicators" aria-hidden="true">
-                {dayTasks.slice(0, 3).map((t) => (
-                  <span
-                    key={t.id}
-                    className="mobile-event-dot"
-                    style={{ backgroundColor: t.googleCalendarColor || "#ff3d8b" }}
-                  />
-                ))}
+                {dayTasks.slice(0, 3).map((t) => {
+                  const tileStyle = getItemTileStyle(t, itemStyles, allCalendarConfigs);
+                  return (
+                    <span
+                      key={t.id}
+                      className="mobile-event-dot"
+                      style={{ backgroundColor: tileStyle.indicatorColor }}
+                    />
+                  );
+                })}
                 {taskCount > 3 && <span className="mobile-more-text">+{taskCount - 3}</span>}
               </div>
 
               {/* Desktop Event / Task Pills (>650px) */}
               <div className="day-cell-event-list">
                 {visibleDayTasks.map((task) => {
-                  const calConfig = task.googleCalendarId ? allCalendarConfigs[task.googleCalendarId] : undefined;
-                  const calendarColor = task.googleCalendarColor || calConfig?.color || "#3b5bff";
+                  const itemType = getItemType(task);
+                  const isAppointment = itemType === "appointment";
+                  const tileStyle = getItemTileStyle(task, itemStyles, allCalendarConfigs);
                   const isDone = task.status === "completed";
                   const isReadOnly = task.isReadOnlyCalendar;
                   const timeLabel = formatTime(task.dueTime);
@@ -320,10 +314,10 @@ export function MonthView({
                   return (
                     <div
                       key={task.id}
-                      className={`month-event-pill ${isDone ? "is-completed" : ""} ${task.isPinned ? "is-pinned" : ""}`}
+                      className={`month-event-pill ${tileStyle.className} ${isDone ? "is-completed" : ""} ${task.isPinned ? "is-pinned" : ""}`}
                       style={{
-                        borderLeftColor: calendarColor,
-                        backgroundColor: isDone ? "#f5f5f4" : `${calendarColor}14`,
+                        ...tileStyle.style,
+                        backgroundColor: isDone ? "#f5f5f4" : tileStyle.style.backgroundColor,
                       }}
                       title={`${task.isGoogleEvent ? `[${task.googleCalendarName || "Google"}] ` : ""}${timeLabel ? `${timeLabel} · ` : ""}${task.title}${task.googleAccountEmail ? ` (${task.googleAccountEmail})` : ""}${isReadOnly ? " · Read-only" : ""}`}
                       onClick={(e) => {
@@ -343,16 +337,25 @@ export function MonthView({
                       {/* Calendar Color Swatch / Dot */}
                       <span
                         className="event-pill-color-dot"
-                        style={{ backgroundColor: calendarColor }}
+                        style={{ backgroundColor: tileStyle.indicatorColor }}
                         aria-hidden="true"
                       />
+
+                      {/* Type Icon */}
+                      {isAppointment ? (
+                        <Clock size={10} weight="bold" style={{ color: tileStyle.indicatorColor, flexShrink: 0 }} aria-hidden="true" />
+                      ) : itemType === "event" ? (
+                        <CalendarBlank size={10} weight="bold" style={{ color: tileStyle.indicatorColor, flexShrink: 0 }} aria-hidden="true" />
+                      ) : (
+                        <CheckSquare size={10} weight="bold" style={{ color: tileStyle.indicatorColor, flexShrink: 0 }} aria-hidden="true" />
+                      )}
 
                       {/* Timed Event Badge */}
                       {timeLabel && <span className="event-pill-time">{timeLabel}</span>}
 
                       {/* Client / Calendar Name Tag for VAs */}
                       {task.isGoogleEvent && task.googleCalendarName && (
-                        <span className="event-pill-calendar-tag" style={{ color: calendarColor }}>
+                        <span className="event-pill-calendar-tag" style={{ color: tileStyle.indicatorColor }}>
                           {task.googleCalendarName.slice(0, 10)}
                         </span>
                       )}

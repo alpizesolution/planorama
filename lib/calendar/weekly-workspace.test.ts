@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
+import fs from "fs";
+import path from "path";
 import { createSignedOAuthState, verifySignedOAuthState } from "../server/crypto";
-import { getWeekDays, toDateKey } from "./date-utils";
+import { getWeekDays, getWorkWeekDays, toDateKey, formatWeekRange } from "./date-utils";
+import { layoutDayEvents, isAllDayItem, formatTimeRange } from "./day-layout";
 import type { PlannerTask } from "../schedule/types";
 import type { GoogleCalendarConfig } from "../google-calendar/types";
 
@@ -193,5 +196,352 @@ describe("PLANORAMA Weekly Workspace & Google Calendar Integration", () => {
       expect(weekKeysSunday[3]).toBe("2026-10-28"); // Wednesday
       expect(weekKeysSunday[6]).toBe("2026-10-31"); // Saturday
     });
+
+    it("formats week range strings cleanly across month and year boundaries", () => {
+      const days = getWeekDays(new Date(2026, 9, 28), 1);
+      expect(formatWeekRange(days)).toBe("Oct 26 – Nov 1, 2026");
+    });
+  });
+
+  describe("4. Hourly Weekly Calendar Grid & All-Day Separation", () => {
+    const mondayKey = "2026-10-26";
+    const wednesdayKey = "2026-10-28";
+
+    const weekTasks: PlannerTask[] = [
+      // All-day item on Monday
+      {
+        id: "all-day-mon",
+        title: "Company Holiday / Quarterly Kickoff",
+        status: "open",
+        priority: "none",
+        projectId: null,
+        labelIds: [],
+        dueDate: mondayKey,
+        dueTime: null,
+        isAllDay: true,
+        notes: "",
+        recurrence: "none",
+        createdAt: "2026-10-26T00:00:00.000Z",
+        updatedAt: "2026-10-26T00:00:00.000Z",
+      },
+      // Timed event on Monday
+      {
+        id: "timed-mon-standup",
+        title: "Team Standup",
+        status: "open",
+        priority: "p2",
+        projectId: null,
+        labelIds: [],
+        dueDate: mondayKey,
+        dueTime: "09:00",
+        durationMinutes: 30,
+        notes: "",
+        recurrence: "none",
+        createdAt: "2026-10-26T00:00:00.000Z",
+        updatedAt: "2026-10-26T00:00:00.000Z",
+      },
+      // Overlapping events on Wednesday: 10:00-11:00 and 10:30-11:30
+      {
+        id: "wed-overlap-1",
+        title: "Design Review",
+        status: "open",
+        priority: "p1",
+        projectId: null,
+        labelIds: [],
+        dueDate: wednesdayKey,
+        dueTime: "10:00",
+        durationMinutes: 60,
+        notes: "",
+        recurrence: "none",
+        createdAt: "2026-10-26T00:00:00.000Z",
+        updatedAt: "2026-10-26T00:00:00.000Z",
+      },
+      {
+        id: "wed-overlap-2",
+        title: "Client Sync",
+        status: "open",
+        priority: "p2",
+        projectId: null,
+        labelIds: [],
+        dueDate: wednesdayKey,
+        dueTime: "10:30",
+        durationMinutes: 60,
+        notes: "",
+        recurrence: "none",
+        createdAt: "2026-10-26T00:00:00.000Z",
+        updatedAt: "2026-10-26T00:00:00.000Z",
+      },
+      // Untimed daily task on Wednesday
+      {
+        id: "wed-untimed-task",
+        title: "Update documentation",
+        status: "open",
+        priority: "none",
+        projectId: null,
+        labelIds: [],
+        dueDate: wednesdayKey,
+        dueTime: "",
+        notes: "",
+        recurrence: "none",
+        createdAt: "2026-10-26T00:00:00.000Z",
+        updatedAt: "2026-10-26T00:00:00.000Z",
+      },
+    ];
+
+    it("correctly separates all-day items from timed events", () => {
+      const monAllDay = weekTasks.filter((t) => t.dueDate === mondayKey && isAllDayItem(t));
+      const monTimed = weekTasks.filter((t) => t.dueDate === mondayKey && !isAllDayItem(t));
+
+      expect(monAllDay.map((t) => t.id)).toEqual(["all-day-mon"]);
+      expect(monTimed.map((t) => t.id)).toEqual(["timed-mon-standup"]);
+
+      const wedAllDay = weekTasks.filter((t) => t.dueDate === wednesdayKey && isAllDayItem(t));
+      const wedTimed = weekTasks.filter((t) => t.dueDate === wednesdayKey && !isAllDayItem(t));
+
+      expect(wedAllDay.map((t) => t.id)).toEqual(["wed-untimed-task"]);
+      expect(wedTimed.map((t) => t.id)).toEqual(["wed-overlap-1", "wed-overlap-2"]);
+    });
+
+    it("lays out overlapping timed events side-by-side without clipping titles", () => {
+      const positioned = layoutDayEvents(weekTasks, wednesdayKey);
+
+      expect(positioned).toHaveLength(2);
+      expect(positioned[0].totalColumns).toBe(2);
+      expect(positioned[1].totalColumns).toBe(2);
+      expect(positioned[0].column).toBe(0);
+      expect(positioned[1].column).toBe(1);
+
+      // Verify formatted time ranges
+      expect(formatTimeRange(positioned[0].startMinutes, positioned[0].endMinutes)).toBe("10:00 AM – 11:00 AM");
+      expect(formatTimeRange(positioned[1].startMinutes, positioned[1].endMinutes)).toBe("10:30 AM – 11:30 AM");
+    });
+  });
+
+  describe("5. Work Weeks View (Monday–Friday 5-Day Layout & Navigation)", () => {
+    it("returns exactly 5 dates strictly from Monday through Friday", () => {
+      // Wednesday Oct 28, 2026
+      const date = new Date(2026, 9, 28);
+      const days = getWorkWeekDays(date);
+
+      expect(days).toHaveLength(5);
+      const dateKeys = days.map(toDateKey);
+      expect(dateKeys).toEqual([
+        "2026-10-26", // Monday
+        "2026-10-27", // Tuesday
+        "2026-10-28", // Wednesday
+        "2026-10-29", // Thursday
+        "2026-10-30", // Friday
+      ]);
+
+      // None of the days should be Saturday (6) or Sunday (0)
+      for (const d of days) {
+        expect(d.getDay()).not.toBe(0);
+        expect(d.getDay()).not.toBe(6);
+      }
+    });
+
+    it("formats the workweek date range Monday through Friday", () => {
+      const days = getWorkWeekDays(new Date(2026, 9, 28));
+      expect(formatWeekRange(days)).toBe("Oct 26 – 30, 2026");
+    });
+
+    it("opens the Monday–Friday workweek even if current date or anchor is Saturday or Sunday", () => {
+      // Saturday Oct 31, 2026
+      const sat = new Date(2026, 9, 31);
+      const satDays = getWorkWeekDays(sat);
+      expect(satDays.map(toDateKey)).toEqual([
+        "2026-10-26",
+        "2026-10-27",
+        "2026-10-28",
+        "2026-10-29",
+        "2026-10-30",
+      ]);
+
+      // Sunday Nov 1, 2026
+      const sun = new Date(2026, 10, 1);
+      const sunDays = getWorkWeekDays(sun);
+      expect(sunDays.map(toDateKey)).toEqual([
+        "2026-10-26",
+        "2026-10-27",
+        "2026-10-28",
+        "2026-10-29",
+        "2026-10-30",
+      ]);
+    });
+
+    it("navigates forward and backward by exactly 1 workweek (7 days offset)", () => {
+      const currentAnchor = new Date(2026, 9, 28);
+      // Next workweek (+7 days)
+      const nextAnchor = new Date(currentAnchor);
+      nextAnchor.setDate(nextAnchor.getDate() + 7);
+      const nextDays = getWorkWeekDays(nextAnchor);
+      expect(nextDays.map(toDateKey)).toEqual([
+        "2026-11-02",
+        "2026-11-03",
+        "2026-11-04",
+        "2026-11-05",
+        "2026-11-06",
+      ]);
+
+      // Prev workweek (-7 days)
+      const prevAnchor = new Date(currentAnchor);
+      prevAnchor.setDate(prevAnchor.getDate() - 7);
+      const prevDays = getWorkWeekDays(prevAnchor);
+      expect(prevDays.map(toDateKey)).toEqual([
+        "2026-10-19",
+        "2026-10-20",
+        "2026-10-21",
+        "2026-10-22",
+        "2026-10-23",
+      ]);
+    });
+
+    it("retains weekend tasks on their original dates without rescheduling or displaying them in the weekday grid", () => {
+      const saturdayTask: PlannerTask = {
+        id: "sat-task-1",
+        title: "Saturday BBQ",
+        status: "open",
+        priority: "p3",
+        dueDate: "2026-10-31", // Saturday
+        dueTime: "13:00",
+        recurrence: "none",
+        isPinned: false,
+        labelIds: [],
+        projectId: null,
+        notes: "Weekend event",
+        createdAt: "2026-10-26T00:00:00.000Z",
+        updatedAt: "2026-10-26T00:00:00.000Z",
+      };
+
+      const sundayTask: PlannerTask = {
+        id: "sun-task-1",
+        title: "Sunday Grocery Run",
+        status: "open",
+        priority: "p4",
+        dueDate: "2026-11-01", // Sunday
+        dueTime: "11:00",
+        recurrence: "none",
+        isPinned: false,
+        labelIds: [],
+        projectId: null,
+        notes: "Weekend chore",
+        createdAt: "2026-10-26T00:00:00.000Z",
+        updatedAt: "2026-10-26T00:00:00.000Z",
+      };
+
+      const weekdayTask: PlannerTask = {
+        id: "tue-task-1",
+        title: "Tuesday Sprint Demo",
+        status: "in_progress",
+        priority: "p1",
+        dueDate: "2026-10-27", // Tuesday
+        dueTime: "14:00",
+        recurrence: "none",
+        isPinned: false,
+        labelIds: [],
+        projectId: null,
+        notes: "Weekday work",
+        createdAt: "2026-10-26T00:00:00.000Z",
+        updatedAt: "2026-10-26T00:00:00.000Z",
+      };
+
+      const allTasks = [saturdayTask, sundayTask, weekdayTask];
+
+      // Work week days for Oct 28
+      const workDays = getWorkWeekDays(new Date(2026, 9, 28));
+      const workDateKeys = new Set(workDays.map(toDateKey));
+
+      // Filter tasks for Work Weeks grid (matching weekDateKeys.has(task.dueDate))
+      const visibleTasks = allTasks.filter((t) => t.dueDate && workDateKeys.has(t.dueDate));
+
+      // Only Tuesday task is visible
+      expect(visibleTasks.map((t) => t.id)).toEqual(["tue-task-1"]);
+
+      // Weekend tasks are NOT visible in the work week grid
+      expect(visibleTasks.some((t) => t.id === "sat-task-1")).toBe(false);
+      expect(visibleTasks.some((t) => t.id === "sun-task-1")).toBe(false);
+
+      // CRITICAL: Weekend tasks retain their original dueDate and times intact
+      expect(saturdayTask.dueDate).toBe("2026-10-31");
+      expect(saturdayTask.dueTime).toBe("13:00");
+      expect(sundayTask.dueDate).toBe("2026-11-01");
+      expect(sundayTask.dueTime).toBe("11:00");
+    });
+  });
+
+  describe("5. Toolbar Architecture — Authoritative Top Navigation & Zero Redundant View Switchers", () => {
+    it("ensures WeekView and Work Weeks do not contain internal Day/Week/Work Weeks/Month view switchers", () => {
+      const weekViewPath = path.resolve(__dirname, "../../app/components/calendar/week-view.tsx");
+      const content = fs.readFileSync(weekViewPath, "utf-8");
+
+      // Verify that duplicate view-switcher container and buttons are absent from WeekView
+      expect(content).not.toContain("day-header-view-switcher");
+      expect(content).not.toContain("day-view-tab-btn");
+      expect(content).not.toContain('role="tablist" aria-label="Switch calendar view"');
+    });
+
+    it("ensures DayView does not contain internal Day/Week/Work Weeks/Month view switchers", () => {
+      const dayViewPath = path.resolve(__dirname, "../../app/components/calendar/day-view.tsx");
+      const content = fs.readFileSync(dayViewPath, "utf-8");
+
+      // Verify that duplicate view-switcher container and buttons are absent from DayView
+      expect(content).not.toContain("day-header-view-switcher");
+      expect(content).not.toContain("day-view-tab-btn");
+      expect(content).not.toContain('role="tablist" aria-label="Switch view"');
+    });
+
+    it("preserves Week and Work Weeks date navigation controls, today button, date picker, and display options", () => {
+      const weekViewPath = path.resolve(__dirname, "../../app/components/calendar/week-view.tsx");
+      const content = fs.readFileSync(weekViewPath, "utf-8");
+
+      // Date navigation buttons
+      expect(content).toContain("onNavigateWeek(-1)");
+      expect(content).toContain("onNavigateWeek(1)");
+
+      // Today button
+      expect(content).toContain("onResetToToday");
+      expect(content).toContain("hasTodayInWeek");
+
+      // Direct Date Picker
+      expect(content).toContain("day-picker-wrap");
+      expect(content).toContain("day-picker-input");
+      expect(content).toContain("onSelectDate(e.target.value)");
+
+      // View-specific display options (7-Day / 5-Day Timeline vs Status Kanban)
+      expect(content).toContain("week-layout-segmented");
+      expect(content).toContain("onSwitchWeeklyMode");
+      expect(content).toContain("Status Kanban");
+      expect(content).toContain("5-Day Timeline");
+      expect(content).toContain("7-Day Timeline");
+    });
+
+    it("preserves DayView date navigation, today button, and direct date picker controls", () => {
+      const dayViewPath = path.resolve(__dirname, "../../app/components/calendar/day-view.tsx");
+      const content = fs.readFileSync(dayViewPath, "utf-8");
+
+      // Date navigation buttons
+      expect(content).toContain("onNavigateDay(-1)");
+      expect(content).toContain("onNavigateDay(1)");
+
+      // Today button
+      expect(content).toContain("onResetToToday");
+      expect(content).toContain("isToday");
+
+      // Direct Date Picker
+      expect(content).toContain("day-picker-wrap");
+      expect(content).toContain("day-picker-input");
+      expect(content).toContain("onSelectDate(e.target.value)");
+    });
+
+    it("ensures top navigation in page.tsx remains the sole place to switch views across all views", () => {
+      const pagePath = path.resolve(__dirname, "../../app/page.tsx");
+      const content = fs.readFileSync(pagePath, "utf-8");
+
+      // Month, Year, Agenda, Day, Week, Work Weeks, Board, Yearline are switched via setView from top nav
+      expect(content).toContain('setView(v.id)');
+      // Confirm DayView and WeekView no longer receive onSwitchView prop
+      expect(content).not.toContain('onSwitchView={(v) => setView(v)}');
+    });
   });
 });
+

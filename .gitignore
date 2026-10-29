@@ -11,3 +11,4 @@ coverage
 .credentials
 *.tsbuildinfo
 .vscode/
+.agents/

@@ -9,48 +9,33 @@ import {
   X,
   DotsSixVertical,
   CaretDown,
-  CaretUp,
   Gear,
-  Palette,
-  SquaresFour,
-  ArrowClockwise,
-  SidebarSimple,
 } from "@phosphor-icons/react";
 import { createTask, getTasks, removeTask, updateTask } from "@/lib/schedule/task-service";
 import type { PlannerTask, PlannerPreferences } from "@/lib/schedule/types";
 import { validateTask } from "@/lib/schedule/validation";
-import { getWeekDays, toDateKey, monthGridDays, daysInMonth } from "@/lib/calendar/date-utils";
+import { getWeekDays, getWorkWeekDays, toDateKey, monthGridDays, daysInMonth } from "@/lib/calendar/date-utils";
 import { generateId } from "@/lib/schedule/id";
-import { DailyHabitsWidget } from "@/app/components/daily-habits-widget";
 import { DashboardView } from "@/app/components/dashboard/dashboard-view";
 import { getHabits, getCheckIns } from "@/lib/habits/habit-service";
 import { writeHabitsToStorage, writeCheckInsToStorage } from "@/lib/habits/storage";
 import type { Habit, HabitCheckIn } from "@/lib/habits/types";
-import type {
-  CalendarThemePreset,
-  CalendarThemeSettings,
-  MonthColorMode,
-} from "@/lib/calendar/calendar-themes";
+import type { CalendarThemeSettings } from "@/lib/calendar/calendar-themes";
 import {
   DEFAULT_CALENDAR_THEME,
-  THEME_PRESET_METADATA,
   getMonthColor,
   getResolvedTheme,
-  resetToThemeDefault,
-  restorePlanoramaDefaults,
 } from "@/lib/calendar/calendar-themes";
-import type {
-  DashboardWidgetId,
-} from "@/lib/dashboard/types";
 import {
   DEFAULT_DASHBOARD_WIDGETS,
-  DASHBOARD_WIDGET_METADATA,
   resolveDashboardWidgets,
 } from "@/lib/dashboard/types";
-import { CalendarSidebar } from "@/app/components/calendar/calendar-sidebar";
+import { CalendarWorkspaceShell } from "@/app/components/calendar/calendar-workspace-shell";
 import { DayView } from "@/app/components/calendar/day-view";
 import { MonthView } from "@/app/components/calendar/month-view";
-import { GoogleCalendarSettings } from "@/app/components/google-calendar-settings";
+import { WeekView } from "@/app/components/calendar/week-view";
+import { YearView } from "@/app/components/calendar/year-view";
+import { AgendaView } from "@/app/components/calendar/agenda-view";
 import { UserProfileButton } from "@/app/components/auth/user-profile-button";
 import {
   executeTwoWaySync,
@@ -65,16 +50,45 @@ import type {
   GoogleIntegrationStatus,
 } from "@/lib/google-calendar/types";
 import { DEFAULT_GOOGLE_SYNC_SETTINGS } from "@/lib/google-calendar/types";
+import {
+  UnifiedCreateModal,
+  type CreateMode,
+  type SaveEventData,
+  type SaveTaskData,
+  type SaveAppointmentData,
+} from "@/app/components/calendar/unified-create-modal";
+import { saveAppointmentSchedule } from "@/lib/schedule/appointment-service";
+import {
+  DEFAULT_ITEM_COLORS,
+  resolveItemColorPreferences,
+  getItemType,
+  getItemTileStyle,
+  DEFAULT_ITEM_STYLES,
+  resolveItemStylesPreferences,
+} from "@/lib/calendar/item-color";
+import {
+  SettingsWorkspace,
+  type SettingsSectionId,
+} from "@/app/components/settings/settings-workspace";
+import {
+  TASK_OPTIONS,
+  getOptionLabel,
+  getOptionEmoji,
+  getOptionDescription,
+  priorityLabel,
+  priorityEmoji,
+} from "@/lib/schedule/task-options";
 
 type TaskTemplate = { id: string; name: string; title: string; notes: string; priority: PlannerTask["priority"]; recurrence: PlannerTask["recurrence"] };
-type TaskLabel = { id: string; name: string };
+export type TaskLabel = { id: string; name: string };
 type TaskProject = { id: string; name: string };
-type AppView = "dashboard" | "day" | "month" | "year" | "yearline" | "agenda" | "week" | "kanban";
+type AppView = "dashboard" | "day" | "month" | "year" | "yearline" | "agenda" | "week" | "workWeek" | "kanban" | "settings";
 
 const NAV_VIEWS: { id: AppView; label: string }[] = [
   { id: "dashboard", label: "Dashboard" },
   { id: "day", label: "Day" },
   { id: "week", label: "Week" },
+  { id: "workWeek", label: "Work Weeks" },
   { id: "month", label: "Month" },
   { id: "year", label: "Year" },
   { id: "yearline", label: "Yearline" },
@@ -86,19 +100,6 @@ const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"
 ];
-
-const EMOJIS = [
-  "✅", "📝", "💡", "🎯", "🔥", "⚡", "💼", "📅", "📌", "🔔",
-  "❤️", "⭐", "🌟", "🎉", "🎨", "🎵", "🏃", "💪", "🌈", "🦋",
-  "🏠", "🍕", "📚", "🎮", "🌿", "🌸", "🌙", "✈️", "🎁", "💰",
-  "😀", "😊", "😅", "🤔", "👍", "🙌", "🤝", "🧠", "👀", "🦄",
-];
-
-function insertEmoji(emoji: string, current: string): string {
-  // Remove any existing leading emoji-like prefix then prepend new one
-  const bare = current.replace(/^[^\p{L}\p{N}\s]+\s*/u, "");
-  return `${emoji} ${bare}`.trimEnd();
-}
 
 const DEFAULT_LABELS: TaskLabel[] = [
   { id: "work", name: "Work" }, { id: "personal", name: "Personal" },
@@ -120,113 +121,8 @@ const DEFAULT_PREFERENCES: PlannerPreferences = {
   calendarTheme: DEFAULT_CALENDAR_THEME,
   dashboardWidgets: DEFAULT_DASHBOARD_WIDGETS,
   googleCalendarSync: DEFAULT_GOOGLE_SYNC_SETTINGS,
+  itemColors: DEFAULT_ITEM_COLORS,
 };
-
-type TaskOptionId =
-  | "p1"
-  | "p2"
-  | "p3"
-  | "p4"
-  | "whenever"
-  | "pinned"
-  | "personal"
-  | "none";
-
-interface TaskOptionItem {
-  id: TaskOptionId;
-  emoji: string;
-  label: string;
-  description: string;
-  type: "priority" | "timing" | "pin" | "category";
-}
-
-const TASK_OPTIONS: TaskOptionItem[] = [
-  {
-    id: "p1",
-    emoji: "🔥",
-    label: "Do This Now",
-    description: "Urgent — handle immediately",
-    type: "priority",
-  },
-  {
-    id: "p2",
-    emoji: "🔴",
-    label: "High",
-    description: "Important and time-sensitive",
-    type: "priority",
-  },
-  {
-    id: "p3",
-    emoji: "🟠",
-    label: "Medium",
-    description: "Important, but not urgent",
-    type: "priority",
-  },
-  {
-    id: "p4",
-    emoji: "🟡",
-    label: "Low",
-    description: "Can wait until later",
-    type: "priority",
-  },
-  {
-    id: "none",
-    emoji: "⚪",
-    label: "No Priority",
-    description: "No priority assigned",
-    type: "priority",
-  },
-  {
-    id: "whenever",
-    emoji: "🟢",
-    label: "Whenever",
-    description: "No specific deadline",
-    type: "timing",
-  },
-  {
-    id: "pinned",
-    emoji: "📌",
-    label: "Pinned",
-    description: "Keep this task easy to find",
-    type: "pin",
-  },
-  {
-    id: "personal",
-    emoji: "🌿",
-    label: "Personal",
-    description: "Optional category for life tasks",
-    type: "category",
-  },
-];
-
-let currentPlannerPreferences: PlannerPreferences = DEFAULT_PREFERENCES;
-
-function getOptionLabel(id: string, prefs: PlannerPreferences = currentPlannerPreferences): string {
-  const custom = prefs?.customLabels?.[id]?.trim();
-  if (custom) return custom;
-  const found = TASK_OPTIONS.find((opt) => opt.id === id);
-  return found ? found.label : id;
-}
-
-function getOptionEmoji(id: string, prefs: PlannerPreferences = currentPlannerPreferences): string {
-  const custom = prefs?.customEmojis?.[id]?.trim();
-  if (custom) return custom;
-  const found = TASK_OPTIONS.find((opt) => opt.id === id);
-  return found ? found.emoji : "";
-}
-
-function getOptionDescription(id: string): string {
-  const found = TASK_OPTIONS.find((opt) => opt.id === id);
-  return found ? found.description : "";
-}
-
-function priorityLabel(priority: PlannerTask["priority"] | undefined, prefs: PlannerPreferences = currentPlannerPreferences): string {
-  return getOptionLabel(priority ?? "none", prefs);
-}
-
-function priorityEmoji(priority: PlannerTask["priority"] | undefined, prefs: PlannerPreferences = currentPlannerPreferences): string {
-  return getOptionEmoji(priority ?? "none", prefs);
-}
 
 interface TaskPriorityOrgControlProps {
   priority: PlannerTask["priority"];
@@ -390,1299 +286,7 @@ function TaskPriorityOrgControl({
   );
 }
 
-interface PreferencesModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  preferences: PlannerPreferences;
-  onSavePreferences: (next: PlannerPreferences) => void;
-  labels: TaskLabel[];
-  onAddLabel: () => void;
-  onDeleteLabel: (id: string) => void;
-  onRestoreDefaults: () => void;
-  onSyncGoogle: () => Promise<void>;
-  isSyncingGoogle: boolean;
-  showToast: (msg: string) => void;
-  onError: (err: string) => void;
-}
 
-function PreferencesModal({
-  isOpen,
-  onClose,
-  preferences,
-  onSavePreferences,
-  labels,
-  onAddLabel,
-  onDeleteLabel,
-  onRestoreDefaults,
-  onSyncGoogle,
-  isSyncingGoogle,
-  showToast,
-  onError,
-}: PreferencesModalProps) {
-  const [showCustomThemeColors, setShowCustomThemeColors] = useState(false);
-  const [draggedWidgetIndex, setDraggedWidgetIndex] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const originalOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = originalOverflow;
-    };
-  }, [isOpen]);
-
-  if (!isOpen) return null;
-
-  const currentDashboardWidgets = resolveDashboardWidgets(preferences.dashboardWidgets);
-
-  function handleToggleWidgetVisibility(id: DashboardWidgetId) {
-    const nextWidgets = currentDashboardWidgets.map((w) =>
-      w.id === id ? { ...w, visible: !w.visible } : w
-    );
-    onSavePreferences({
-      ...preferences,
-      dashboardWidgets: nextWidgets,
-    });
-  }
-
-  function handleMoveWidget(index: number, direction: "up" | "down") {
-    const targetIndex = direction === "up" ? index - 1 : index + 1;
-    if (targetIndex < 0 || targetIndex >= currentDashboardWidgets.length) return;
-    const nextWidgets = [...currentDashboardWidgets];
-    const [moved] = nextWidgets.splice(index, 1);
-    nextWidgets.splice(targetIndex, 0, moved);
-    onSavePreferences({
-      ...preferences,
-      dashboardWidgets: nextWidgets,
-    });
-  }
-
-  function handleWidgetDragStart(index: number) {
-    setDraggedWidgetIndex(index);
-  }
-
-  function handleWidgetDragOver(e: React.DragEvent) {
-    e.preventDefault();
-  }
-
-  function handleWidgetDrop(index: number) {
-    if (draggedWidgetIndex === null || draggedWidgetIndex === index) {
-      setDraggedWidgetIndex(null);
-      return;
-    }
-    const nextWidgets = [...currentDashboardWidgets];
-    const [moved] = nextWidgets.splice(draggedWidgetIndex, 1);
-    nextWidgets.splice(index, 0, moved);
-    setDraggedWidgetIndex(null);
-    onSavePreferences({
-      ...preferences,
-      dashboardWidgets: nextWidgets,
-    });
-  }
-
-  function handleRestoreDefaultWidgets() {
-    onSavePreferences({
-      ...preferences,
-      dashboardWidgets: DEFAULT_DASHBOARD_WIDGETS.map((w) => ({ ...w })),
-    });
-  }
-
-  const disabled = preferences.disabledOptions ?? [];
-  const customLabels = preferences.customLabels ?? {};
-
-  function handleLabelChange(id: string, newLabel: string) {
-    onSavePreferences({
-      ...preferences,
-      customLabels: {
-        ...customLabels,
-        [id]: newLabel,
-      },
-    });
-  }
-
-  function handleToggleDisabled(id: string) {
-    const isCurrentlyDisabled = disabled.includes(id);
-    let nextDisabled: string[];
-    if (isCurrentlyDisabled) {
-      nextDisabled = disabled.filter((item) => item !== id);
-    } else {
-      nextDisabled = [...disabled, id];
-    }
-    let nextDefaultPriority = preferences.defaultPriority ?? "none";
-    if (id === nextDefaultPriority && !isCurrentlyDisabled) {
-      nextDefaultPriority = "none";
-    }
-    onSavePreferences({
-      ...preferences,
-      disabledOptions: nextDisabled,
-      defaultPriority: nextDefaultPriority,
-    });
-  }
-
-  const priorityItems = TASK_OPTIONS.filter((opt) => opt.type === "priority");
-  const focusItems = TASK_OPTIONS.filter((opt) => opt.type === "timing" || opt.type === "pin");
-  const categoryItems = TASK_OPTIONS.filter((opt) => opt.type === "category");
-
-  const currentCalendarTheme = preferences.calendarTheme ?? DEFAULT_CALENDAR_THEME;
-  const resolvedModalTheme = getResolvedTheme(currentCalendarTheme);
-
-  function handleSelectPreset(preset: CalendarThemePreset) {
-    onSavePreferences({
-      ...preferences,
-      calendarTheme: {
-        ...currentCalendarTheme,
-        preset,
-      },
-    });
-  }
-
-  function handleSelectMode(mode: MonthColorMode) {
-    onSavePreferences({
-      ...preferences,
-      calendarTheme: {
-        ...currentCalendarTheme,
-        mode,
-      },
-    });
-  }
-
-  function handleUpdateCustomThemeField(field: keyof CalendarThemeSettings, val: string) {
-    onSavePreferences({
-      ...preferences,
-      calendarTheme: {
-        ...currentCalendarTheme,
-        [field]: val,
-      },
-    });
-  }
-
-  function handleUpdateMonthColor(mIdx: number, newBg: string) {
-    const currentMonth = getMonthColor(resolvedModalTheme, mIdx);
-    const custom = { ...(currentCalendarTheme.customMonthColors ?? {}) };
-    custom[mIdx] = {
-      ...currentMonth,
-      bg: newBg,
-      tileBg: newBg,
-      border: newBg,
-    };
-    onSavePreferences({
-      ...preferences,
-      calendarTheme: {
-        ...currentCalendarTheme,
-        customMonthColors: custom,
-      },
-    });
-  }
-
-  function handleResetTheme() {
-    onSavePreferences({
-      ...preferences,
-      calendarTheme: resetToThemeDefault(currentCalendarTheme.preset, currentCalendarTheme.mode),
-    });
-  }
-
-  function handleRestoreDefaultsTheme() {
-    onSavePreferences({
-      ...preferences,
-      calendarTheme: restorePlanoramaDefaults(),
-    });
-  }
-
-  return (
-    <div
-      className="modal-overlay"
-      onClick={onClose}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") onClose();
-      }}
-    >
-      <div
-        className="modal-card preferences-modal"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-label="Planner preferences and customization"
-      >
-        <div className="preferences-modal-header">
-          <div className="preferences-modal-title-group">
-            <h3>Preferences & Customization</h3>
-            <p className="preferences-modal-subtitle">
-              Manage priority levels, focus timing, categories, and planner defaults.
-            </p>
-          </div>
-          <button className="modal-close" onClick={onClose} aria-label="Close preferences">
-            <X size={20} />
-          </button>
-        </div>
-
-        {/* SECTION 1: GENERAL & DEFAULTS */}
-        <section className="preferences-section">
-          <div className="preferences-section-kicker">General & Defaults</div>
-          <p className="preferences-section-desc">
-            Set default behavior for new tasks, calendar start days, and sorting.
-          </p>
-          <div className="preference-fields" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "10px" }}>
-            <label>
-              Default priority for new tasks
-              <select
-                aria-label="Default priority for new tasks"
-                value={preferences.defaultPriority ?? "none"}
-                onChange={(e) =>
-                  onSavePreferences({
-                    ...preferences,
-                    defaultPriority: e.target.value as PlannerTask["priority"],
-                  })
-                }
-              >
-                {priorityItems.map((opt) => (
-                  <option key={opt.id} value={opt.id}>
-                    {getOptionEmoji(opt.id, preferences)} {getOptionLabel(opt.id, preferences)}
-                    {disabled.includes(opt.id) ? " (disabled)" : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Week starts on
-              <select
-                aria-label="Week starts on"
-                value={preferences.weekStartsOn}
-                onChange={(e) =>
-                  onSavePreferences({
-                    ...preferences,
-                    weekStartsOn: Number(e.target.value) as PlannerPreferences["weekStartsOn"],
-                  })
-                }
-              >
-                <option value={0}>Sunday</option>
-                <option value={1}>Monday</option>
-                <option value={6}>Saturday</option>
-              </select>
-            </label>
-            <label>
-              Default task sorting
-              <select
-                aria-label="Default task sorting"
-                value={preferences.defaultSort}
-                onChange={(e) =>
-                  onSavePreferences({
-                    ...preferences,
-                    defaultSort: e.target.value as PlannerPreferences["defaultSort"],
-                  })
-                }
-              >
-                <option value="due">Due date</option>
-                <option value="priority">Priority</option>
-                <option value="newest">Newest first</option>
-              </select>
-            </label>
-          </div>
-        </section>
-
-        {/* SECTION: DASHBOARD CUSTOMIZATION */}
-        <section className="preferences-section dashboard-customization-section">
-          <div className="preferences-section-kicker">
-            <SquaresFour size={16} weight="bold" style={{ marginRight: 6, verticalAlign: "-2px" }} />
-            Dashboard Customization
-          </div>
-          <p className="preferences-section-desc">
-            Show, hide, and reorder the widgets on your personal planning command center. Drag cards or use the arrows to reorder.
-          </p>
-
-          <div className="dashboard-widget-pref-list" role="list" aria-label="Dashboard Widgets">
-            {currentDashboardWidgets.map((w, index) => {
-              const meta = DASHBOARD_WIDGET_METADATA[w.id];
-              const isFirst = index === 0;
-              const isLast = index === currentDashboardWidgets.length - 1;
-
-              return (
-                <div
-                  key={w.id}
-                  className={`dashboard-widget-pref-row ${w.visible ? "is-visible" : "is-hidden"} ${draggedWidgetIndex === index ? "is-dragging" : ""}`}
-                  draggable
-                  onDragStart={() => handleWidgetDragStart(index)}
-                  onDragOver={(e) => handleWidgetDragOver(e)}
-                  onDrop={() => handleWidgetDrop(index)}
-                >
-                  <div className="dashboard-pref-left">
-                    <span className="dashboard-pref-drag-handle" aria-hidden="true" title="Drag to reorder">
-                      <DotsSixVertical size={16} />
-                    </span>
-                    <span className="dashboard-pref-icon" aria-hidden="true">{meta.icon}</span>
-                    <div className="dashboard-pref-info">
-                      <div className="dashboard-pref-name-row">
-                        <strong className="dashboard-pref-name">{meta.name}</strong>
-                        {meta.badge && <span className="dashboard-pref-badge">{meta.badge}</span>}
-                      </div>
-                      <span className="dashboard-pref-desc">{meta.description}</span>
-                    </div>
-                  </div>
-
-                  <div className="dashboard-pref-actions">
-                    <div className="dashboard-pref-order-btns">
-                      <button
-                        type="button"
-                        className="pref-order-btn"
-                        onClick={() => handleMoveWidget(index, "up")}
-                        disabled={isFirst}
-                        aria-label={`Move ${meta.name} up`}
-                        title="Move up"
-                      >
-                        <CaretUp size={14} weight="bold" />
-                      </button>
-                      <button
-                        type="button"
-                        className="pref-order-btn"
-                        onClick={() => handleMoveWidget(index, "down")}
-                        disabled={isLast}
-                        aria-label={`Move ${meta.name} down`}
-                        title="Move down"
-                      >
-                        <CaretDown size={14} weight="bold" />
-                      </button>
-                    </div>
-
-                    <button
-                      type="button"
-                      className={`preference-toggle-btn ${w.visible ? "is-active" : "is-disabled"}`}
-                      onClick={() => handleToggleWidgetVisibility(w.id)}
-                      aria-pressed={w.visible}
-                      title={w.visible ? "Hide this widget" : "Show this widget"}
-                    >
-                      {w.visible ? "Visible" : "Hidden"}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="dashboard-pref-footer-actions">
-            <button
-              type="button"
-              className="dashboard-pref-restore-btn"
-              onClick={handleRestoreDefaultWidgets}
-            >
-              <ArrowClockwise size={13} weight="bold" style={{ marginRight: 5, verticalAlign: "-1px" }} />
-              Restore Default Widget Layout
-            </button>
-          </div>
-        </section>
-
-        {/* SECTION: CALENDAR APPEARANCE & THEMES */}
-        <section className="preferences-section calendar-theme-section">
-          <div className="preferences-section-kicker">
-            <Palette size={16} weight="bold" style={{ marginRight: 6, verticalAlign: "-2px" }} />
-            Calendar Appearance & Themes
-          </div>
-          <p className="preferences-section-desc">
-            Customize calendar tiles, month headers, weekend highlights, and color themes across all calendar views.
-          </p>
-
-          <div className="calendar-theme-presets-grid">
-            {(["colorful", "bold_pop", "soft_pastel", "minimal"] as CalendarThemePreset[]).map((presetId) => {
-              const meta = THEME_PRESET_METADATA[presetId];
-              const isSelected = currentCalendarTheme.preset === presetId;
-              return (
-                <button
-                  key={presetId}
-                  type="button"
-                  className={`theme-preset-card ${isSelected ? "is-selected" : ""}`}
-                  onClick={() => handleSelectPreset(presetId)}
-                  aria-pressed={isSelected}
-                >
-                  <div className="theme-preset-card-top">
-                    <span className="theme-preset-name">
-                      {meta.name}
-                      {meta.badge && <span className="theme-preset-badge">{meta.badge}</span>}
-                    </span>
-                    {isSelected && <span className="theme-preset-check">✓ Active</span>}
-                  </div>
-                  <p className="theme-preset-desc">{meta.description}</p>
-                  <div className="theme-preset-palette-preview">
-                    {meta.previewColors.map((color, i) => (
-                      <span key={i} className="theme-preset-swatch" style={{ backgroundColor: color }} />
-                    ))}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="theme-mode-selector-wrap">
-            <span className="theme-control-label">Month Tile Appearance</span>
-            <div className="segmented theme-mode-segmented" role="radiogroup" aria-label="Month Tile Appearance">
-              <button
-                type="button"
-                role="radio"
-                aria-checked={currentCalendarTheme.mode === "headers"}
-                className={currentCalendarTheme.mode === "headers" ? "selected" : ""}
-                onClick={() => handleSelectMode("headers")}
-              >
-                🎨 Colorful Headers
-              </button>
-              <button
-                type="button"
-                role="radio"
-                aria-checked={currentCalendarTheme.mode === "tiles"}
-                className={currentCalendarTheme.mode === "tiles" ? "selected" : ""}
-                onClick={() => handleSelectMode("tiles")}
-              >
-                🌈 Colorful Tiles
-              </button>
-            </div>
-            <span className="theme-mode-hint">
-              {currentCalendarTheme.mode === "headers"
-                ? "Each month has a distinct pastel header while calendar days stay neutral."
-                : "Each month tile and header are subtly tinted with matching colors."}
-            </span>
-          </div>
-
-          <div className="theme-customization-accordion">
-            <button
-              type="button"
-              className="theme-customization-toggle"
-              onClick={() => setShowCustomThemeColors((prev) => !prev)}
-              aria-expanded={showCustomThemeColors}
-            >
-              <span>⚙ Customize Individual Theme Colors</span>
-              <span>{showCustomThemeColors ? "▲ Hide" : "▼ Show"}</span>
-            </button>
-
-            {showCustomThemeColors && (
-              <div className="theme-customization-panel">
-                <div className="theme-custom-group">
-                  <strong className="theme-custom-group-title">Global Calendar Accents</strong>
-                  <div className="theme-custom-pickers-grid">
-                    <label className="theme-color-picker-item">
-                      <span>Calendar Background</span>
-                      <div className="theme-picker-input-wrap">
-                        <input
-                          type="color"
-                          value={resolvedModalTheme.calendarBg}
-                          onChange={(e) => handleUpdateCustomThemeField("calendarBg", e.target.value)}
-                        />
-                        <code>{resolvedModalTheme.calendarBg}</code>
-                      </div>
-                    </label>
-                    <label className="theme-color-picker-item">
-                      <span>Weekend Highlight</span>
-                      <div className="theme-picker-input-wrap">
-                        <input
-                          type="color"
-                          value={resolvedModalTheme.weekendBg}
-                          onChange={(e) => handleUpdateCustomThemeField("weekendBg", e.target.value)}
-                        />
-                        <code>{resolvedModalTheme.weekendBg}</code>
-                      </div>
-                    </label>
-                    <label className="theme-color-picker-item">
-                      <span>Today Highlight</span>
-                      <div className="theme-picker-input-wrap">
-                        <input
-                          type="color"
-                          value={resolvedModalTheme.todayBg}
-                          onChange={(e) => handleUpdateCustomThemeField("todayBg", e.target.value)}
-                        />
-                        <code>{resolvedModalTheme.todayBg}</code>
-                      </div>
-                    </label>
-                    <label className="theme-color-picker-item">
-                      <span>Selected Date Highlight</span>
-                      <div className="theme-picker-input-wrap">
-                        <input
-                          type="color"
-                          value={resolvedModalTheme.selectedBg}
-                          onChange={(e) => handleUpdateCustomThemeField("selectedBg", e.target.value)}
-                        />
-                        <code>{resolvedModalTheme.selectedBg}</code>
-                      </div>
-                    </label>
-                    <label className="theme-color-picker-item">
-                      <span>Task Activity Indicator</span>
-                      <div className="theme-picker-input-wrap">
-                        <input
-                          type="color"
-                          value={resolvedModalTheme.taskDotColor}
-                          onChange={(e) => handleUpdateCustomThemeField("taskDotColor", e.target.value)}
-                        />
-                        <code>{resolvedModalTheme.taskDotColor}</code>
-                      </div>
-                    </label>
-                  </div>
-                </div>
-
-                <div className="theme-custom-group">
-                  <strong className="theme-custom-group-title">12 Monthly Header Colors</strong>
-                  <div className="theme-months-pickers-grid">
-                    {MONTH_NAMES.map((name, mIdx) => {
-                      const mColor = getMonthColor(resolvedModalTheme, mIdx);
-                      return (
-                        <div key={mIdx} className="theme-month-picker-cell" style={{ borderLeftColor: mColor.border }}>
-                          <div className="theme-month-picker-header">
-                            <span className="theme-month-picker-name">{name.slice(0, 3)}</span>
-                            <span className="theme-month-picker-sample" style={{ backgroundColor: mColor.bg, color: mColor.text }}>
-                              {String(mIdx + 1).padStart(2, "0")}
-                            </span>
-                          </div>
-                          <div className="theme-picker-input-wrap">
-                            <input
-                              type="color"
-                              aria-label={`${name} header color`}
-                              value={mColor.bg}
-                              onChange={(e) => handleUpdateMonthColor(mIdx, e.target.value)}
-                            />
-                            <code>{mColor.bg}</code>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="theme-custom-actions">
-                  <button
-                    type="button"
-                    className="theme-reset-btn"
-                    onClick={handleResetTheme}
-                  >
-                    ↺ Reset to {THEME_PRESET_METADATA[resolvedModalTheme.preset].name} Defaults
-                  </button>
-                  <button
-                    type="button"
-                    className="theme-restore-defaults-btn"
-                    onClick={handleRestoreDefaultsTheme}
-                  >
-                    ★ Restore Planorama Defaults
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* SECTION 3: PRIORITY LEVELS */}
-        <section className="preferences-section">
-          <div className="preferences-section-kicker">Priority Levels</div>
-          <p className="preferences-section-desc">
-            Customize labels or disable levels from task creation. Historical tasks keep their assigned priority.
-          </p>
-          <div className="preferences-list">
-            {priorityItems.map((opt) => {
-              const isDisabled = disabled.includes(opt.id);
-              const labelValue = customLabels[opt.id] ?? opt.label;
-              return (
-                <div key={opt.id} className={`preference-item-row ${isDisabled ? "is-disabled" : ""}`}>
-                  <div className="preference-row-main">
-                    <span className="preference-emoji-badge" aria-hidden="true">{opt.emoji}</span>
-                    <div className="preference-info">
-                      <input
-                        type="text"
-                        className="preference-label-input"
-                        value={labelValue}
-                        maxLength={30}
-                        onChange={(e) => handleLabelChange(opt.id, e.target.value)}
-                        placeholder={opt.label}
-                        aria-label={`Label for ${opt.label}`}
-                      />
-                      <span className="preference-desc-text">{opt.description}</span>
-                    </div>
-                  </div>
-                  <div className="preference-row-actions">
-                    <button
-                      type="button"
-                      className={`preference-toggle-btn ${isDisabled ? "is-disabled" : "is-active"}`}
-                      onClick={() => handleToggleDisabled(opt.id)}
-                      aria-pressed={!isDisabled}
-                      title={isDisabled ? "Enable this priority" : "Disable this priority"}
-                    >
-                      {isDisabled ? "Disabled" : "Active"}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-
-        {/* SECTION 3: FOCUS OPTIONS */}
-        <section className="preferences-section">
-          <div className="preferences-section-kicker">Focus Options</div>
-          <p className="preferences-section-desc">
-            Timing preferences and persistent pin options that operate independently from priority.
-          </p>
-          <div className="preferences-list">
-            {focusItems.map((opt) => {
-              const isDisabled = disabled.includes(opt.id);
-              const labelValue = customLabels[opt.id] ?? opt.label;
-              return (
-                <div key={opt.id} className={`preference-item-row ${isDisabled ? "is-disabled" : ""}`}>
-                  <div className="preference-row-main">
-                    <span className="preference-emoji-badge" aria-hidden="true">{opt.emoji}</span>
-                    <div className="preference-info">
-                      <input
-                        type="text"
-                        className="preference-label-input"
-                        value={labelValue}
-                        maxLength={30}
-                        onChange={(e) => handleLabelChange(opt.id, e.target.value)}
-                        placeholder={opt.label}
-                        aria-label={`Label for ${opt.label}`}
-                      />
-                      <span className="preference-desc-text">{opt.description}</span>
-                    </div>
-                  </div>
-                  <div className="preference-row-actions">
-                    <button
-                      type="button"
-                      className={`preference-toggle-btn ${isDisabled ? "is-disabled" : "is-active"}`}
-                      onClick={() => handleToggleDisabled(opt.id)}
-                      aria-pressed={!isDisabled}
-                      title={isDisabled ? "Enable this focus option" : "Disable this focus option"}
-                    >
-                      {isDisabled ? "Disabled" : "Active"}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-
-        {/* SECTION 4: CATEGORIES & LABELS */}
-        <section className="preferences-section">
-          <div className="preferences-section-kicker">Categories & Labels</div>
-          <p className="preferences-section-desc">
-            Organize personal life tasks and manage custom categories for your workspace.
-          </p>
-          <div className="preferences-list" style={{ marginBottom: "14px" }}>
-            {categoryItems.map((opt) => {
-              const isDisabled = disabled.includes(opt.id);
-              const labelValue = customLabels[opt.id] ?? opt.label;
-              return (
-                <div key={opt.id} className={`preference-item-row ${isDisabled ? "is-disabled" : ""}`}>
-                  <div className="preference-row-main">
-                    <span className="preference-emoji-badge" aria-hidden="true">{opt.emoji}</span>
-                    <div className="preference-info">
-                      <input
-                        type="text"
-                        className="preference-label-input"
-                        value={labelValue}
-                        maxLength={30}
-                        onChange={(e) => handleLabelChange(opt.id, e.target.value)}
-                        placeholder={opt.label}
-                        aria-label={`Label for ${opt.label}`}
-                      />
-                      <span className="preference-desc-text">{opt.description}</span>
-                    </div>
-                  </div>
-                  <div className="preference-row-actions">
-                    <button
-                      type="button"
-                      className={`preference-toggle-btn ${isDisabled ? "is-disabled" : "is-active"}`}
-                      onClick={() => handleToggleDisabled(opt.id)}
-                      aria-pressed={!isDisabled}
-                      title={isDisabled ? "Enable this category" : "Disable this category"}
-                    >
-                      {isDisabled ? "Disabled" : "Active"}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="label-manager-subgroup" style={{ background: "#fbf9f5", padding: "12px", borderRadius: "8px", border: "1px solid #ded6c7" }}>
-            <div className="label-manager-heading" style={{ marginBottom: "8px" }}>
-              <strong>Custom Project Labels</strong>
-              <button type="button" className="task-action" onClick={onAddLabel}>
-                + Add label
-              </button>
-            </div>
-            {labels.length > 0 ? (
-              <div className="label-chip-list">
-                {labels.map((label) => (
-                  <span className="label-management-chip" key={label.id}>
-                    {label.name}
-                    <button
-                      type="button"
-                      aria-label={`Delete ${label.name} label`}
-                      onClick={() => onDeleteLabel(label.id)}
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <p style={{ fontSize: "11.5px", color: "#78716c", margin: 0 }}>No custom labels created yet.</p>
-            )}
-          </div>
-        </section>
-
-        {/* SECTION 5: INTEGRATIONS → GOOGLE CALENDAR */}
-        <GoogleCalendarSettings
-          preferences={preferences}
-          onSavePreferences={onSavePreferences}
-          onSyncNow={onSyncGoogle}
-          isSyncing={isSyncingGoogle}
-          showToast={showToast}
-          onError={onError}
-        />
-
-        {/* SECTION 6: FOOTER ACTIONS */}
-        <div className="preferences-footer-actions">
-          <button
-            type="button"
-            className="preferences-restore-btn"
-            onClick={onRestoreDefaults}
-          >
-            ↺ Restore Default Options
-          </button>
-          <button
-            type="button"
-            className="preferences-done-btn"
-            onClick={onClose}
-          >
-            Done
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-interface AddTaskModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  initialDueDate?: string | null;
-  initialDueTime?: string | null;
-  initialStatus?: PlannerTask["status"];
-  preferences: PlannerPreferences;
-  labels: TaskLabel[];
-  onAddLabel: (name?: string) => TaskLabel | null;
-  writableCalendars?: import("@/lib/google-calendar/types").GoogleCalendarConfig[];
-  onSaveTask: (taskData: {
-    title: string;
-    dueDate: string | null;
-    dueTime: string | null;
-    status: PlannerTask["status"];
-    priority: PlannerTask["priority"];
-    isPinned: boolean;
-    isPersonal: boolean;
-    timingPreference: "scheduled" | "whenever";
-    labelIds: string[];
-    notes: string;
-    location?: string;
-    googleCalendarId?: string;
-  }) => Promise<boolean>;
-}
-
-function AddTaskModal({
-  isOpen,
-  onClose,
-  initialDueDate,
-  initialDueTime,
-  initialStatus,
-  preferences,
-  labels,
-  onAddLabel,
-  writableCalendars = [],
-  onSaveTask,
-}: AddTaskModalProps) {
-  const [title, setTitle] = useState("");
-  const [dueDate, setDueDate] = useState("");
-  const [dueTime, setDueTime] = useState("");
-  const [location, setLocation] = useState("");
-  const [selectedCalendarId, setSelectedCalendarId] = useState("none");
-  const [status, setStatus] = useState<PlannerTask["status"]>("open");
-  const [priority, setPriority] = useState<PlannerTask["priority"]>("none");
-  const [isPinned, setIsPinned] = useState(false);
-  const [isPersonal, setIsPersonal] = useState(false);
-  const [timingPreference, setTimingPreference] = useState<"scheduled" | "whenever">("scheduled");
-  const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
-  const [notes, setNotes] = useState("");
-  const [taskEmoji, setTaskEmoji] = useState("");
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [isAddingLabel, setIsAddingLabel] = useState(false);
-  const [newLabelInput, setNewLabelInput] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  const titleInputRef = useRef<HTMLInputElement | null>(null);
-  const emojiPickerRef = useRef<HTMLDivElement | null>(null);
-  const isSavingRef = useRef(false);
-
-  // Initialize or reset form whenever modal opens or initial props change
-  useEffect(() => {
-    if (isOpen) {
-      setTitle("");
-      setDueDate(initialDueDate ?? "");
-      setDueTime(initialDueTime ?? "");
-      setLocation("");
-      const defaultCal = preferences.googleCalendarSync?.defaultCalendarId;
-      const syncEnabled = preferences.googleCalendarSync?.enabled;
-      setSelectedCalendarId(syncEnabled && defaultCal ? defaultCal : "none");
-      setStatus(initialStatus ?? "open");
-      setPriority(preferences.defaultPriority ?? "none");
-      setIsPinned(false);
-      setIsPersonal(false);
-      setTimingPreference("scheduled");
-      setSelectedLabelIds([]);
-      setNotes("");
-      setTaskEmoji("");
-      setShowEmojiPicker(false);
-      setIsAddingLabel(false);
-      setNewLabelInput("");
-      setError("");
-      isSavingRef.current = false;
-      setIsSaving(false);
-
-      // Lock body scroll
-      const originalOverflow = document.body.style.overflow;
-      document.body.style.overflow = "hidden";
-
-      // Focus title input
-      const timer = setTimeout(() => {
-        titleInputRef.current?.focus();
-      }, 50);
-
-      return () => {
-        document.body.style.overflow = originalOverflow;
-        clearTimeout(timer);
-      };
-    }
-  }, [isOpen, initialDueDate, initialDueTime, initialStatus, preferences.defaultPriority, preferences.googleCalendarSync?.defaultCalendarId, preferences.googleCalendarSync?.enabled]);
-
-  // Close emoji picker on click outside
-  useEffect(() => {
-    if (!showEmojiPicker) return;
-    function handleClickOutside(e: MouseEvent) {
-      if (emojiPickerRef.current && !emojiPickerRef.current.contains(e.target as Node)) {
-        setShowEmojiPicker(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [showEmojiPicker]);
-
-  if (!isOpen) return null;
-
-  const handleToggleLabel = (id: string) => {
-    setSelectedLabelIds((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
-    );
-  };
-
-  const handleCreateLabel = () => {
-    const trimmed = newLabelInput.trim();
-    if (!trimmed) return;
-    const created = onAddLabel(trimmed);
-    if (created) {
-      setSelectedLabelIds((prev) => (prev.includes(created.id) ? prev : [...prev, created.id]));
-      setNewLabelInput("");
-      setIsAddingLabel(false);
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanTitle = title.trim();
-    if (!cleanTitle || isSavingRef.current) return;
-
-    isSavingRef.current = true;
-    setIsSaving(true);
-    setError("");
-
-    try {
-      const success = await onSaveTask({
-        title: cleanTitle,
-        dueDate: dueDate ? dueDate : null,
-        dueTime: dueTime ? dueTime : null,
-        status,
-        priority,
-        isPinned,
-        isPersonal,
-        timingPreference,
-        labelIds: selectedLabelIds,
-        notes: notes.trim(),
-        location: location.trim() || undefined,
-        googleCalendarId: selectedCalendarId !== "none" ? selectedCalendarId : undefined,
-      });
-      if (success) {
-        onClose();
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "This task could not be saved. Please try again.";
-      setError(msg);
-    } finally {
-      isSavingRef.current = false;
-      setIsSaving(false);
-    }
-  };
-
-  return (
-    <div
-      className="modal-overlay"
-      onClick={onClose}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") onClose();
-      }}
-    >
-      <div
-        className="modal-card add-task-modal-standard"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-label="Add Task"
-      >
-        {/* 1. Modal header */}
-        <div className="add-task-modal-header">
-          <h3 className="add-task-modal-title">Add Task</h3>
-          <button
-            type="button"
-            className="modal-close"
-            onClick={onClose}
-            aria-label="Close"
-          >
-            <X size={20} />
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="add-task-standard-form">
-          {/* 2 & 3. Icon / emoji selector + Task title */}
-          <div className="add-task-title-group">
-            <div className="add-task-title-input-wrap">
-              <div className="emoji-picker-anchor" ref={emojiPickerRef}>
-                <button
-                  type="button"
-                  className="add-task-emoji-trigger"
-                  aria-label="Pick task emoji"
-                  title="Pick task emoji"
-                  onClick={() => setShowEmojiPicker((prev) => !prev)}
-                >
-                  {taskEmoji || "🙂"}
-                </button>
-                {showEmojiPicker && (
-                  <div className="emoji-picker-popover">
-                    <div className="emoji-grid">
-                      {EMOJIS.map((em) => (
-                        <button
-                          key={em}
-                          type="button"
-                          className="emoji-item-btn"
-                          onClick={() => {
-                            setTaskEmoji(em);
-                            setTitle((t) => insertEmoji(em, t));
-                            setShowEmojiPicker(false);
-                            titleInputRef.current?.focus();
-                          }}
-                        >
-                          {em}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-              <input
-                ref={titleInputRef}
-                className="add-task-title-input"
-                placeholder="What needs to be done?"
-                maxLength={240}
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                disabled={isSaving}
-                required
-              />
-            </div>
-          </div>
-
-          {/* 4 & 5. Due date & Due time */}
-          <div className="add-task-row-two-col">
-            <label className="add-task-field-label">
-              <span className="add-task-field-title">Due date</span>
-              <input
-                type="date"
-                className="add-task-native-input"
-                value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
-                disabled={isSaving}
-              />
-            </label>
-            <label className="add-task-field-label">
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span className="add-task-field-title">Time (optional)</span>
-                {dueTime && (
-                  <button
-                    type="button"
-                    onClick={() => setDueTime("")}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      color: "#e11d48",
-                      fontSize: "11px",
-                      fontWeight: 700,
-                      cursor: "pointer",
-                      padding: 0,
-                    }}
-                    title="Clear time (make all-day)"
-                  >
-                    Clear time
-                  </button>
-                )}
-              </div>
-              <input
-                type="time"
-                className="add-task-native-input"
-                value={dueTime}
-                onChange={(e) => {
-                  setDueTime(e.target.value);
-                  if (e.target.value && !dueDate) {
-                    const now = new Date();
-                    setDueDate(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`);
-                  }
-                }}
-                disabled={isSaving}
-              />
-            </label>
-          </div>
-
-          {/* Quick Time Presets */}
-          <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap", marginTop: "-4px", marginBottom: "6px" }}>
-            <span style={{ fontSize: "11px", color: "#78716c", fontWeight: 600 }}>Quick time:</span>
-            {[
-              { label: "Morning (9 AM)", val: "09:00" },
-              { label: "Noon (12 PM)", val: "12:00" },
-              { label: "Afternoon (3 PM)", val: "15:00" },
-              { label: "Evening (6 PM)", val: "18:00" },
-            ].map((preset) => (
-              <button
-                key={preset.val}
-                type="button"
-                onClick={() => {
-                  setDueTime(preset.val);
-                  if (!dueDate) {
-                    const now = new Date();
-                    setDueDate(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`);
-                  }
-                }}
-                style={{
-                  background: dueTime === preset.val ? "#ffd84d" : "#f5efe6",
-                  border: "1.5px solid #1c1917",
-                  borderRadius: "6px",
-                  padding: "2px 7px",
-                  fontSize: "10.5px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  color: "#1c1917",
-                  transition: "all 0.15s ease",
-                }}
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Status */}
-          <div style={{ marginBottom: "6px" }}>
-            <label className="add-task-field-label">
-              <span className="add-task-field-title">Status</span>
-              <select
-                className="add-task-native-select"
-                value={status}
-                onChange={(e) => setStatus(e.target.value as PlannerTask["status"])}
-                disabled={isSaving}
-              >
-                <option value="open">To Do</option>
-                <option value="in_progress">In Progress</option>
-                <option value="completed">Done</option>
-              </select>
-            </label>
-          </div>
-
-          {/* 6. Priority & Organization */}
-          <div className="add-task-priority-org-wrapper">
-            <TaskPriorityOrgControl
-              priority={priority}
-              isPinned={isPinned}
-              isPersonal={isPersonal}
-              timingPreference={timingPreference}
-              preferences={preferences}
-              onSelectPriority={setPriority}
-              onTogglePinned={() => setIsPinned((p) => !p)}
-              onTogglePersonal={() => setIsPersonal((c) => !c)}
-              onToggleTimingPreference={() =>
-                setTimingPreference((t) => (t === "whenever" ? "scheduled" : "whenever"))
-              }
-            />
-          </div>
-
-          {/* 7. Labels */}
-          <div className="add-task-labels-section">
-            <div className="add-task-labels-header">
-              <span className="add-task-field-title">Labels</span>
-              {!isAddingLabel && (
-                <button
-                  type="button"
-                  className="add-task-add-label-btn"
-                  onClick={() => setIsAddingLabel(true)}
-                >
-                  <Plus size={12} weight="bold" /> Add label
-                </button>
-              )}
-            </div>
-
-            {isAddingLabel && (
-              <div className="add-task-new-label-inline">
-                <input
-                  type="text"
-                  className="add-task-new-label-input"
-                  placeholder="New label name…"
-                  value={newLabelInput}
-                  maxLength={40}
-                  autoFocus
-                  onChange={(e) => setNewLabelInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      handleCreateLabel();
-                    } else if (e.key === "Escape") {
-                      setIsAddingLabel(false);
-                      setNewLabelInput("");
-                    }
-                  }}
-                />
-                <button
-                  type="button"
-                  className="add-task-new-label-save"
-                  onClick={handleCreateLabel}
-                  disabled={!newLabelInput.trim()}
-                >
-                  Add
-                </button>
-                <button
-                  type="button"
-                  className="add-task-new-label-cancel"
-                  onClick={() => {
-                    setIsAddingLabel(false);
-                    setNewLabelInput("");
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
-            )}
-
-            <div className="add-task-labels-list">
-              {labels.length === 0 ? (
-                <div className="add-task-no-labels">
-                  <span>No labels yet.</span>
-                  {!isAddingLabel && (
-                    <button
-                      type="button"
-                      className="add-task-create-first-label"
-                      onClick={() => setIsAddingLabel(true)}
-                    >
-                      Create one
-                    </button>
-                  )}
-                </div>
-              ) : (
-                labels.map((l) => {
-                  const isSelected = selectedLabelIds.includes(l.id);
-                  return (
-                    <button
-                      key={l.id}
-                      type="button"
-                      className={`add-task-label-chip ${isSelected ? "is-selected" : ""}`}
-                      onClick={() => handleToggleLabel(l.id)}
-                      aria-pressed={isSelected}
-                    >
-                      <span className="add-task-chip-check">{isSelected ? "✓" : "+"}</span>
-                      <span className="add-task-chip-text">{l.name}</span>
-                    </button>
-                  );
-                })
-              )}
-            </div>
-          </div>
-
-          {/* 8. Notes */}
-          <div className="add-task-notes-section">
-            <label className="add-task-field-label">
-              <span className="add-task-field-title">Notes (optional)</span>
-              <textarea
-                className="add-task-notes-textarea"
-                placeholder="Add details or a reminder…"
-                rows={3}
-                maxLength={2000}
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                disabled={isSaving}
-              />
-            </label>
-          </div>
-
-          {/* 9. Location */}
-          <div style={{ marginBottom: "10px" }}>
-            <label className="add-task-field-label">
-              <span className="add-task-field-title">Location (optional)</span>
-              <input
-                type="text"
-                className="add-task-notes-textarea"
-                style={{ minHeight: "36px", padding: "6px 10px", resize: "none" }}
-                placeholder="Meeting location, video link, or room…"
-                maxLength={300}
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                disabled={isSaving}
-              />
-            </label>
-          </div>
-
-          {/* 10. Calendar Destination (Google Calendar Two-Way Sync) */}
-          {writableCalendars && writableCalendars.length > 0 && (
-            <div style={{ marginBottom: "14px" }}>
-              <label className="add-task-field-label">
-                <span className="add-task-field-title">Calendar Destination</span>
-                <select
-                  className="add-task-native-select"
-                  value={selectedCalendarId}
-                  onChange={(e) => setSelectedCalendarId(e.target.value)}
-                  disabled={isSaving}
-                  style={{ width: "100%", padding: "6px 10px", fontSize: "12.5px" }}
-                >
-                  <option value="none">Planorama (Local Only)</option>
-                  {writableCalendars.map((cal) => (
-                    <option key={cal.id} value={cal.id}>
-                      📅 {cal.name} {cal.accountEmail ? `(${cal.accountEmail})` : ""} {cal.primary ? "· Primary" : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-          )}
-
-          {/* Error alert if saving fails */}
-          {error && (
-            <div className="add-task-error-alert" role="alert">
-              {error}
-            </div>
-          )}
-
-          {/* 9. Create Task button: Green success styling */}
-          <button
-            type="submit"
-            className="add-task-submit-btn"
-            disabled={!title.trim() || isSaving}
-          >
-            <Plus size={18} weight="bold" />
-            <span>{isSaving ? "Creating…" : "Create Task"}</span>
-          </button>
-        </form>
-      </div>
-    </div>
-  );
-}
 
 export default function HomePage() {
   const [tasks, setTasks] = useState<PlannerTask[]>([]);
@@ -1713,7 +317,6 @@ export default function HomePage() {
   const [taskSearch, setTaskSearch] = useState("");
   const [taskSort, setTaskSort] = useState<"due" | "priority" | "newest">("due");
   const [preferences, setPreferences] = useState<PlannerPreferences>(DEFAULT_PREFERENCES);
-  currentPlannerPreferences = preferences;
   const resolvedTheme = useMemo(
     () => getResolvedTheme(preferences.calendarTheme),
     [preferences.calendarTheme]
@@ -1742,7 +345,18 @@ export default function HomePage() {
   const [editProjectId, setEditProjectId] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
   const [calendarFilter, setCalendarFilter] = useState("");
-  const [preferencesModalOpen, setPreferencesModalOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionId>("general");
+  const [previousView, setPreviousView] = useState<AppView>("month");
+
+  const openSettings = useCallback((section: SettingsSectionId = "general") => {
+    setView((curr) => {
+      if (curr !== "settings") {
+        setPreviousView(curr);
+      }
+      return "settings";
+    });
+    setSettingsSection(section);
+  }, []);
 
   // Year view state
   const [yearOffset, setYearOffset] = useState(0);
@@ -1773,18 +387,32 @@ export default function HomePage() {
   const [emojiPickerFor, setEmojiPickerFor] = useState<string | null>(null);
   const emojiPickerRef = useRef<HTMLDivElement | null>(null);
 
-  // Unified Add Task modal state
+  // Unified Creation Modal state (Event, Task & Appointment Schedule)
   const [addTaskOpen, setAddTaskOpen] = useState(false);
+  const [createModalMode, setCreateModalMode] = useState<CreateMode>("task");
   const [addTaskDueDate, setAddTaskDueDate] = useState<string | null>(null);
   const [addTaskDueTime, setAddTaskDueTime] = useState<string | null>(null);
   const [addTaskStatus, setAddTaskStatus] = useState<PlannerTask["status"]>("open");
 
-  const openAddTask = useCallback((options?: { date?: string | null; time?: string | null; status?: PlannerTask["status"] }) => {
+  const openCreateModal = useCallback((modalMode: CreateMode = "event", options?: { date?: string | null; time?: string | null; status?: PlannerTask["status"] }) => {
+    setCreateModalMode(modalMode);
     setAddTaskDueDate(options?.date !== undefined ? options.date : (selectedDate || toDateKey(new Date())));
     setAddTaskDueTime(options?.time ?? null);
     setAddTaskStatus(options?.status ?? "open");
     setAddTaskOpen(true);
   }, [selectedDate]);
+
+  const openAddTask = useCallback((options?: { date?: string | null; time?: string | null; status?: PlannerTask["status"] }) => {
+    openCreateModal("task", options);
+  }, [openCreateModal]);
+
+  const openAddEvent = useCallback((options?: { date?: string | null; time?: string | null }) => {
+    openCreateModal("event", options);
+  }, [openCreateModal]);
+
+  const openAddAppointment = useCallback((options?: { date?: string | null }) => {
+    openCreateModal("appointment", options);
+  }, [openCreateModal]);
 
   const closeAddTask = useCallback(() => {
     setAddTaskOpen(false);
@@ -1815,27 +443,74 @@ export default function HomePage() {
   // Google integration status & sidebar toggle state
   const [googleStatus, setGoogleStatus] = useState<GoogleIntegrationStatus | null>(null);
   const [localCalendarEnabled, setLocalCalendarEnabled] = useState(true);
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  // Toggle sidebar function that persists preference on desktop/tablet
+  const handleToggleSidebar = () => {
+    setSidebarOpen((prev) => {
+      const next = !prev;
+      if (typeof window !== "undefined" && window.innerWidth > 768) {
+        savePreferences({
+          ...preferences,
+          sidebarCollapsed: !next,
+        });
+      }
+      return next;
+    });
+  };
+
+  // On mobile screens, collapse sidebar on initial mount and on view changes
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.innerWidth <= 768) {
+      setSidebarOpen(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.innerWidth <= 768) {
+      setSidebarOpen(false);
+    }
+  }, [view]);
+
+  // Handle Escape key to close open drawers
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setSidebarOpen(false);
+      }
+    }
+    if (sidebarOpen) {
+      window.addEventListener("keydown", handleKeyDown);
+      return () => window.removeEventListener("keydown", handleKeyDown);
+    }
+  }, [sidebarOpen]);
 
   const today = useMemo(() => new Date(), []);
   const shownDate = new Date(today.getFullYear(), today.getMonth() + monthOffset, 1);
   const shownYear = today.getFullYear() + yearOffset;
 
-  // Mini-calendar date for sidebar (in week/day view, follows active anchor or selected date + month offset)
+  // Mini-calendar date for sidebar (in week/day/year view, follows active anchor or selected date + month offset)
   const miniCalendarShownDate = useMemo(() => {
     let base = today;
-    if (view === "week") {
+    if (view === "week" || view === "workWeek") {
       base = weeklyAnchorDate;
-    } else if (view === "day") {
+    } else if (view === "day" || view === "agenda" || view === "dashboard" || view === "kanban") {
       if (selectedDate) {
         const [y, m, d] = selectedDate.split("-").map(Number);
         base = new Date(y, m - 1, d);
       } else {
         base = today;
       }
+    } else if (view === "year" || view === "yearline") {
+      if (selectedDate) {
+        const [y, m, d] = selectedDate.split("-").map(Number);
+        base = new Date(y, m - 1, d);
+      } else {
+        base = new Date(today.getFullYear() + yearOffset, today.getMonth(), 1);
+      }
     }
     return new Date(base.getFullYear(), base.getMonth() + monthOffset, 1);
-  }, [view, weeklyAnchorDate, selectedDate, today, monthOffset]);
+  }, [view, weeklyAnchorDate, selectedDate, today, monthOffset, yearOffset]);
 
   // Day view computed current date
   const currentDayDate = useMemo(() => {
@@ -1866,14 +541,15 @@ export default function HomePage() {
     return getWeekDays(weeklyAnchorDate, preferences.weekStartsOn);
   }, [weeklyAnchorDate, preferences.weekStartsOn]);
 
+  const workWeekDays = useMemo(() => {
+    return getWorkWeekDays(weeklyAnchorDate);
+  }, [weeklyAnchorDate]);
+
   const orderedWeekDayNames = useMemo(() => {
     const names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     return [...names.slice(preferences.weekStartsOn), ...names.slice(0, preferences.weekStartsOn)];
   }, [preferences.weekStartsOn]);
 
-  const orderedMiniDayNames = useMemo(() => {
-    return orderedWeekDayNames.map((name) => name[0]);
-  }, [orderedWeekDayNames]);
 
   const todayKey = toDateKey(today);
 
@@ -1919,19 +595,6 @@ export default function HomePage() {
       return true;
     });
   }, [tasks, activeCalendarConfigs, calendarFilter, localCalendarEnabled]);
-
-  // Tasks grouped for the weekly kanban board
-  const weekDateKeys = useMemo(() => new Set(weekDays.map(toDateKey)), [weekDays]);
-  const weekTasksByStatus = useMemo(() => {
-    const map: Record<PlannerTask["status"], PlannerTask[]> = { open: [], in_progress: [], completed: [] };
-    for (const task of displayedTasks) {
-      if (task.dueDate && weekDateKeys.has(task.dueDate)) {
-        if (map[task.status]) map[task.status].push(task);
-        else map.open.push(task);
-      }
-    }
-    return map;
-  }, [displayedTasks, weekDateKeys]);
 
   const completed = displayedTasks.filter((task) => task.status === "completed").length;
   const visibleTasks = displayedTasks.filter((task) => {
@@ -2001,8 +664,14 @@ export default function HomePage() {
           googleCalendarSync: parsed.googleCalendarSync && typeof parsed.googleCalendarSync === "object"
             ? (parsed.googleCalendarSync as GoogleCalendarSyncSettings)
             : DEFAULT_PREFERENCES.googleCalendarSync,
+          sidebarCollapsed: typeof parsed.sidebarCollapsed === "boolean" ? parsed.sidebarCollapsed : DEFAULT_PREFERENCES.sidebarCollapsed,
+          itemColors: resolveItemColorPreferences(parsed.itemColors),
+          itemStyles: resolveItemStylesPreferences(parsed.itemStyles, parsed.itemColors),
         };
         setPreferences(nextPreferences);
+        if (typeof window !== "undefined" && window.innerWidth > 768 && typeof parsed.sidebarCollapsed === "boolean") {
+          setSidebarOpen(!parsed.sidebarCollapsed);
+        }
         setTaskSort(defaultSort);
         setNewPriority(defaultPriority);
       }
@@ -2023,7 +692,6 @@ export default function HomePage() {
   function savePreferences(next: PlannerPreferences) {
     try {
       window.localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(next));
-      currentPlannerPreferences = next;
       setPreferences(next);
       setSaveError("");
     } catch {
@@ -2167,8 +835,12 @@ export default function HomePage() {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     const viewParam = params.get("view") as AppView | null;
-    if (viewParam && NAV_VIEWS.some((v) => v.id === viewParam)) {
+    const sectionParam = params.get("section") as SettingsSectionId | null;
+    if (viewParam && (NAV_VIEWS.some((v) => v.id === viewParam) || viewParam === "settings")) {
       setView(viewParam);
+    }
+    if (sectionParam) {
+      setSettingsSection(sectionParam);
     }
     const gcalStatus = params.get("gcal_status");
     const gcalError = params.get("gcal_error");
@@ -2383,6 +1055,8 @@ export default function HomePage() {
         customEmojis: importedPreferences.customEmojis && typeof importedPreferences.customEmojis === "object" ? (importedPreferences.customEmojis as Record<string, string>) : (preferences.customEmojis ?? {}),
         calendarTheme: importedPreferences.calendarTheme && typeof importedPreferences.calendarTheme === "object" ? (importedPreferences.calendarTheme as CalendarThemeSettings) : preferences.calendarTheme,
         dashboardWidgets: resolveDashboardWidgets(importedPreferences.dashboardWidgets ?? preferences.dashboardWidgets),
+        itemColors: resolveItemColorPreferences(importedPreferences.itemColors ?? preferences.itemColors),
+        itemStyles: resolveItemStylesPreferences(importedPreferences.itemStyles ?? preferences.itemStyles, importedPreferences.itemColors ?? preferences.itemColors),
       };
 
       const validTemplates = Array.isArray(importedTemplates) && importedTemplates.every((item) =>
@@ -2524,6 +1198,8 @@ export default function HomePage() {
         recurrence: newRecurrence,
         labelIds: selectedLabelIds,
         projectId: newProjectId || null,
+        itemType: "task",
+        color: preferences.itemColors?.taskColor,
       });
       setTasks((current) => [...current, task]);
       setNewTask("");
@@ -2542,20 +1218,7 @@ export default function HomePage() {
     }
   }
 
-  const handleSaveNewTask = async (taskData: {
-    title: string;
-    dueDate: string | null;
-    dueTime: string | null;
-    status: PlannerTask["status"];
-    priority: PlannerTask["priority"];
-    isPinned: boolean;
-    isPersonal: boolean;
-    timingPreference: "scheduled" | "whenever";
-    labelIds: string[];
-    notes: string;
-    location?: string;
-    googleCalendarId?: string;
-  }): Promise<boolean> => {
+  const handleSaveNewTask = async (taskData: SaveTaskData): Promise<boolean> => {
     const targetCalendar = taskData.googleCalendarId
       ? preferences.googleCalendarSync?.calendarConfigs[taskData.googleCalendarId]
       : undefined;
@@ -2578,12 +1241,80 @@ export default function HomePage() {
       googleAccountEmail: targetCalendar?.accountEmail,
       source: taskData.googleCalendarId ? "google" : "local",
       syncStatus: taskData.googleCalendarId ? "pending" : undefined,
+      itemType: "task",
+      color: preferences.itemColors?.taskColor,
     });
     setTasks((current) => [...current, task]);
     if (taskData.googleCalendarId && task.dueDate) {
       void handleSyncGoogle();
     }
     showToast("Task created!");
+    return true;
+  };
+
+  const handleSaveNewEvent = async (eventData: SaveEventData): Promise<boolean> => {
+    const isGoogle = Boolean(eventData.calendarId && eventData.calendarId !== "none");
+    const targetCalendar = isGoogle
+      ? preferences.googleCalendarSync?.calendarConfigs[eventData.calendarId]
+      : undefined;
+
+    const task = await createTask({
+      title: eventData.title,
+      dueDate: eventData.startDate,
+      dueTime: eventData.isAllDay ? null : eventData.startTime,
+      status: "open",
+      priority: "none",
+      isPinned: false,
+      isPersonal: false,
+      timingPreference: eventData.isAllDay ? "whenever" : "scheduled",
+      labelIds: [],
+      notes: eventData.notes,
+      location: eventData.location,
+      attendees: eventData.attendees,
+      isAllDay: eventData.isAllDay,
+      durationMinutes: eventData.durationMinutes,
+      isPrivateAvailabilityOnly: eventData.isPrivateAvailabilityOnly,
+      googleCalendarId: isGoogle ? eventData.calendarId : undefined,
+      googleCalendarName: targetCalendar?.name,
+      googleCalendarColor: targetCalendar?.color,
+      googleAccountId: targetCalendar?.accountId,
+      googleAccountEmail: targetCalendar?.accountEmail,
+      isGoogleEvent: isGoogle,
+      source: isGoogle ? "google" : "local",
+      syncStatus: isGoogle ? "pending" : undefined,
+      recurrence: eventData.recurrence,
+      itemType: "event",
+      color: isGoogle ? targetCalendar?.color : preferences.itemColors?.eventColor,
+    });
+
+    setTasks((current) => [...current, task]);
+    if (isGoogle && task.dueDate) {
+      void handleSyncGoogle();
+    }
+    showToast("Event created!");
+    return true;
+  };
+
+  const handleSaveNewAppointment = async (apptData: SaveAppointmentData): Promise<boolean> => {
+    await saveAppointmentSchedule(apptData);
+    const activeDay = apptData.days.find((d) => d.enabled);
+    const task = await createTask({
+      title: `Availability: ${apptData.title}`,
+      dueDate: selectedDate || todayKey,
+      dueTime: activeDay?.startTime ?? "09:00",
+      status: "open",
+      priority: "none",
+      isPinned: false,
+      isPersonal: false,
+      timingPreference: "scheduled",
+      labelIds: [],
+      notes: apptData.description || `Booking slot duration: ${apptData.durationMinutes} min`,
+      durationMinutes: apptData.durationMinutes,
+      itemType: "appointment",
+      color: preferences.itemColors?.scheduleColor,
+    });
+    setTasks((current) => [...current, task]);
+    showToast("Appointment schedule saved!");
     return true;
   };
 
@@ -2599,6 +1330,7 @@ export default function HomePage() {
       d.setDate(d.getDate() - 7);
       return d;
     });
+    setMonthOffset(0);
   }
 
   function nextWeek() {
@@ -2607,33 +1339,23 @@ export default function HomePage() {
       d.setDate(d.getDate() + 7);
       return d;
     });
+    setMonthOffset(0);
   }
 
   function todayWeek() {
     setWeeklyAnchorDate(new Date());
     setSelectedDate(todayKey);
+    setNewDueDate(todayKey);
+    setMonthOffset(0);
   }
-
-  const formatWeekRange = (days: Date[]) => {
-    if (days.length === 0) return "";
-    const start = days[0];
-    const end = days[6];
-    const startMonth = start.toLocaleDateString("en", { month: "short" });
-    const endMonth = end.toLocaleDateString("en", { month: "short" });
-    if (start.getFullYear() === end.getFullYear()) {
-      if (start.getMonth() === end.getMonth()) {
-        return `${startMonth} ${start.getDate()} – ${end.getDate()}, ${start.getFullYear()}`;
-      }
-      return `${startMonth} ${start.getDate()} – ${endMonth} ${end.getDate()}, ${start.getFullYear()}`;
-    }
-    return `${startMonth} ${start.getDate()}, ${start.getFullYear()} – ${endMonth} ${end.getDate()}, ${end.getFullYear()}`;
-  };
 
   function handleSelectYearDate(dateKey: string) {
     setSelectedDate(dateKey);
     setNewDueDate(dateKey);
     const [y, m, d] = dateKey.split("-").map(Number);
     setWeeklyAnchorDate(new Date(y, m - 1, d));
+    setYearOffset(y - today.getFullYear());
+    setMonthOffset(0);
     if (view === "yearline") {
       handleSelectYearlineDate(dateKey);
     } else {
@@ -2662,7 +1384,10 @@ export default function HomePage() {
         const [, m, d] = selectedDate.split("-");
         const maxD = daysInMonth(newYear, Number(m) - 1);
         const clampedD = Math.min(Number(d), maxD);
-        setSelectedDate(`${newYear}-${m}-${String(clampedD).padStart(2, "0")}`);
+        const newKey = `${newYear}-${m}-${String(clampedD).padStart(2, "0")}`;
+        setSelectedDate(newKey);
+        setNewDueDate(newKey);
+        setWeeklyAnchorDate(new Date(newYear, Number(m) - 1, clampedD));
       }
       return newOffset;
     });
@@ -3233,56 +1958,68 @@ export default function HomePage() {
                           {/* Tasks inside this date row */}
                           {dayTasks.length > 0 && (
                             <div className="yearline-task-list">
-                              {dayTasks.map((t) => (
-                                <div
-                                  key={t.id}
-                                  className={`yearline-task-item ${t.status === "completed" ? "is-done" : ""} ${t.isPinned ? "is-pinned" : ""}`}
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  <button
-                                    type="button"
-                                    className="yearline-task-toggle"
-                                    aria-label={t.status === "completed" ? `Mark ${t.title} open` : `Mark ${t.title} complete`}
-                                    onClick={() => void toggleTask(t)}
+                              {dayTasks.map((t) => {
+                                const tileStyle = getItemTileStyle(t, preferences.itemStyles, activeCalendarConfigs);
+                                const iType = getItemType(t);
+                                const isAppt = iType === "appointment";
+                                const isEvt = iType === "event";
+                                return (
+                                  <div
+                                    key={t.id}
+                                    className={`yearline-task-item ${tileStyle.className} ${t.status === "completed" ? "is-done" : ""} ${t.isPinned ? "is-pinned" : ""}`}
+                                    style={{
+                                      ...tileStyle.style,
+                                      backgroundColor: t.status === "completed" ? "#fafaf9" : tileStyle.style.backgroundColor,
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
                                   >
-                                    {t.status === "completed" ? (
-                                      <CheckCircle size={14} weight="fill" color="#15803d" />
-                                    ) : (
-                                      <Circle size={14} color="#78716c" />
-                                    )}
-                                  </button>
-                                  {t.isPinned && <span className="yearline-task-pin-icon" title="Pinned: Keep this task easy to find">📌</span>}
-                                  {t.isGoogleEvent && (
-                                    <span
-                                      className="yearline-source-dot"
-                                      style={{ backgroundColor: t.googleCalendarColor || "#4285F4" }}
-                                      title={`Google: ${t.googleCalendarName || "Calendar"}${t.isReadOnlyCalendar ? " (Read-only)" : ""}`}
-                                    />
-                                  )}
-                                  <button
-                                    type="button"
-                                    className="yearline-task-title-btn"
-                                    onClick={() => openTaskDetail(t)}
-                                    title={`${t.isGoogleEvent ? `[${t.googleCalendarName || "Google"}] ` : ""}${t.title} · ${priorityLabel(t.priority)}${t.isPinned ? " · Pinned" : ""}${t.isPersonal ? " · Personal" : ""}${t.timingPreference === "whenever" ? " · Whenever" : ""}${t.labelIds?.length ? ` · Labels: ${t.labelIds.map(id => labels.find(l => l.id === id)?.name ?? id).join(", ")}` : ""}`}
-                                  >
-                                    {t.title}
-                                  </button>
-                                  {t.labelIds?.length > 0 && (
-                                    <span
-                                      className="yearline-task-badge-icon"
-                                      title={`Labels: ${t.labelIds.map((id) => labels.find((l) => l.id === id)?.name ?? id).join(", ")}`}
+                                    <button
+                                      type="button"
+                                      className="yearline-task-toggle"
+                                      aria-label={t.status === "completed" ? `Mark ${t.title} open` : `Mark ${t.title} complete`}
+                                      onClick={() => void toggleTask(t)}
                                     >
-                                      🏷️
-                                    </span>
-                                  )}
-                                  {t.isPersonal && <span className="yearline-task-badge-icon" title="Personal: Optional category for life tasks">🌿</span>}
-                                  {t.timingPreference === "whenever" && <span className="yearline-task-badge-icon" title="Whenever: No specific deadline">🟢</span>}
-                                  <span
-                                    className={`yearline-task-pri-dot priority-dot-${t.priority}`}
-                                    title={`Priority: ${priorityLabel(t.priority)}`}
-                                  />
-                                </div>
-                              ))}
+                                      {t.status === "completed" ? (
+                                        <CheckCircle size={14} weight="fill" color="#15803d" />
+                                      ) : (
+                                        <Circle size={14} color="#78716c" />
+                                      )}
+                                    </button>
+                                    {isAppt && <span className="yearline-task-badge-icon" title="Appointment Schedule">⏱️</span>}
+                                    {isEvt && !t.isGoogleEvent && <span className="yearline-task-badge-icon" title="Event">📅</span>}
+                                    {t.isPinned && <span className="yearline-task-pin-icon" title="Pinned: Keep this task easy to find">📌</span>}
+                                    {t.isGoogleEvent && (
+                                      <span
+                                        className="yearline-source-dot"
+                                        style={{ backgroundColor: t.googleCalendarColor || tileStyle.primaryColor }}
+                                        title={`Google: ${t.googleCalendarName || "Calendar"}${t.isReadOnlyCalendar ? " (Read-only)" : ""}`}
+                                      />
+                                    )}
+                                    <button
+                                      type="button"
+                                      className="yearline-task-title-btn"
+                                      onClick={() => openTaskDetail(t)}
+                                      title={`${t.isGoogleEvent ? `[${t.googleCalendarName || "Google"}] ` : ""}${t.title} · ${priorityLabel(t.priority)}${t.isPinned ? " · Pinned" : ""}${t.isPersonal ? " · Personal" : ""}${t.timingPreference === "whenever" ? " · Whenever" : ""}${t.labelIds?.length ? ` · Labels: ${t.labelIds.map(id => labels.find(l => l.id === id)?.name ?? id).join(", ")}` : ""}`}
+                                    >
+                                      {t.title}
+                                    </button>
+                                    {t.labelIds?.length > 0 && (
+                                      <span
+                                        className="yearline-task-badge-icon"
+                                        title={`Labels: ${t.labelIds.map((id) => labels.find((l) => l.id === id)?.name ?? id).join(", ")}`}
+                                      >
+                                        🏷️
+                                      </span>
+                                    )}
+                                    {t.isPersonal && <span className="yearline-task-badge-icon" title="Personal: Optional category for life tasks">🌿</span>}
+                                    {t.timingPreference === "whenever" && <span className="yearline-task-badge-icon" title="Whenever: No specific deadline">🟢</span>}
+                                    <span
+                                      className={`yearline-task-pri-dot priority-dot-${t.priority}`}
+                                      title={`Priority: ${priorityLabel(t.priority)}`}
+                                    />
+                                  </div>
+                                );
+                              })}
                             </div>
                           )}
                         </div>
@@ -3358,561 +2095,123 @@ export default function HomePage() {
         </div>
         {selectedDateTasks.length > 0 && (
           <div className="selected-date-tasks-list">
-            {selectedDateTasks.map((task) => (
-              <div
-                key={task.id}
-                className={`selected-date-task-item priority-accent-${task.priority} ${task.status === "completed" ? "is-done" : ""}`}
-                onClick={() => openTaskDetail(task)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    openTaskDetail(task);
-                  }
-                }}
-              >
-                <button
-                  type="button"
-                  className="selected-date-task-toggle"
-                  aria-label={task.status === "completed" ? "Mark incomplete" : "Mark complete"}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void toggleTask(task);
+            {selectedDateTasks.map((task) => {
+              const tileStyle = getItemTileStyle(task, preferences.itemStyles, activeCalendarConfigs);
+              const iType = getItemType(task);
+              const isAppt = iType === "appointment";
+              const isEvt = iType === "event";
+              return (
+                <div
+                  key={task.id}
+                  className={`selected-date-task-item ${tileStyle.className} priority-accent-${task.priority} ${task.status === "completed" ? "is-done" : ""}`}
+                  style={{
+                    ...tileStyle.style,
+                    backgroundColor: task.status === "completed" ? "#fafaf9" : tileStyle.style.backgroundColor,
+                  }}
+                  onClick={() => openTaskDetail(task)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      openTaskDetail(task);
+                    }
                   }}
                 >
-                  {task.status === "completed" ? (
-                    <CheckCircle size={18} weight="fill" color="#15803d" />
-                  ) : (
-                    <Circle size={18} color="#78716c" />
-                  )}
-                </button>
-                <div className="selected-date-task-info">
-                  <span className="selected-date-task-title">{task.title}</span>
-                  {task.dueTime && (
-                    <span className="selected-date-task-time">
-                      🕒 {new Date(`2000-01-01T${task.dueTime}`).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}
+                  <button
+                    type="button"
+                    className="selected-date-task-toggle"
+                    aria-label={task.status === "completed" ? "Mark incomplete" : "Mark complete"}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void toggleTask(task);
+                    }}
+                  >
+                    {task.status === "completed" ? (
+                      <CheckCircle size={18} weight="fill" color="#15803d" />
+                    ) : (
+                      <Circle size={18} color="#78716c" />
+                    )}
+                  </button>
+                  <div className="selected-date-task-info">
+                    <span className="selected-date-task-title">{task.title}</span>
+                    {task.dueTime && (
+                      <span className="selected-date-task-time">
+                        🕒 {new Date(`2000-01-01T${task.dueTime}`).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}
+                      </span>
+                    )}
+                  </div>
+                  <div className="selected-date-task-meta">
+                    {isAppt && <span className="badge-chip" style={{ backgroundColor: "#fef3c7", color: "#92400e", border: "1px solid #fde68a" }}>⏱️ Schedule</span>}
+                    {isEvt && <span className="badge-chip" style={{ backgroundColor: "#e0f2fe", color: "#0369a1", border: "1px solid #bae6fd" }}>📅 Event</span>}
+                    {task.isPinned && <span title="Pinned">📌</span>}
+                    {task.isPersonal && <span className="badge-chip badge-personal">🌿 Personal</span>}
+                    {task.timingPreference === "whenever" && <span className="badge-chip badge-whenever">🟢 Whenever</span>}
+                    {task.labelIds?.map((id) => {
+                      const lbl = labels.find((l) => l.id === id);
+                      return lbl ? <span key={id} className="task-label-chip">🏷️ {lbl.name}</span> : null;
+                    })}
+                    <span className={`priority-badge-sm priority-${task.priority}`}>
+                      {priorityEmoji(task.priority)} {priorityLabel(task.priority)}
                     </span>
-                  )}
+                  </div>
                 </div>
-                <div className="selected-date-task-meta">
-                  {task.isPinned && <span title="Pinned">📌</span>}
-                  {task.isPersonal && <span className="badge-chip badge-personal">🌿 Personal</span>}
-                  {task.timingPreference === "whenever" && <span className="badge-chip badge-whenever">🟢 Whenever</span>}
-                  {task.labelIds?.map((id) => {
-                    const lbl = labels.find((l) => l.id === id);
-                    return lbl ? <span key={id} className="task-label-chip">🏷️ {lbl.name}</span> : null;
-                  })}
-                  <span className={`priority-badge-sm priority-${task.priority}`}>
-                    {priorityEmoji(task.priority)} {priorityLabel(task.priority)}
-                  </span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
     );
   };
 
-  const renderWeeklyPlanner = (isYearSection = false) => (
-    <section className="weekly-planner-card neo-card" id="week-view" ref={isYearSection ? weeklyPlannerRef : undefined}>
-      <div className="weekly-planner-header">
-        <div className="weekly-planner-header-title-wrap">
-          {!isYearSection && (
-            <button
-              type="button"
-              className="mobile-sidebar-toggle-btn week-mobile-sidebar-btn"
-              onClick={() => setMobileSidebarOpen((prev) => !prev)}
-              aria-label="Toggle calendar sidebar"
-            >
-              <SidebarSimple size={18} weight="bold" />
-              <span>Calendars</span>
-            </button>
-          )}
-          <div>
-            <span className="section-kicker">{isYearSection ? "WEEKLY PLANNER" : "WEEKLY OVERVIEW"}</span>
-            <h2>{formatWeekRange(weekDays)}</h2>
-          </div>
-        </div>
-        <div className="weekly-planner-actions">
-          <div className="segmented" aria-label="Weekly layout mode">
-            <button
-              type="button"
-              className={weeklyViewMode === "timeline" ? "selected" : ""}
-              onClick={() => setWeeklyViewMode("timeline")}
-            >
-              7-Day Timeline
-            </button>
-            <button
-              type="button"
-              className={weeklyViewMode === "kanban" ? "selected" : ""}
-              onClick={() => setWeeklyViewMode("kanban")}
-            >
-              Status Kanban
-            </button>
-          </div>
-          <div className="calendar-actions">
-            <button type="button" className="icon-button" aria-label="Previous week" onClick={prevWeek}>←</button>
-            <button type="button" className="icon-button today-btn" onClick={todayWeek}>Today</button>
-            <button type="button" className="icon-button" aria-label="Next week" onClick={nextWeek}>→</button>
-          </div>
-        </div>
-      </div>
-      {saveError && (
-        <div className="week-save-error-banner" role="status">
-          <p className="save-error" style={{ margin: 0 }}>{saveError}</p>
-          <button
-            type="button"
-            className="week-error-dismiss-btn"
-            onClick={() => setSaveError("")}
-            aria-label="Dismiss message"
-          >
-            ✕
-          </button>
-        </div>
-      )}
-
-      {weeklyViewMode === "timeline" ? (
-        <>
-          {/* Mobile Selected-Day Planner (displayed on <= 768px, hidden on desktop) */}
-          {(() => {
-            const activeWeekDateKey = (selectedDate && weekDateKeys.has(selectedDate))
-              ? selectedDate
-              : (weekDateKeys.has(todayKey) ? todayKey : toDateKey(weekDays[0]));
-            const activeWeekDate = weekDays.find((d) => toDateKey(d) === activeWeekDateKey) ?? weekDays[0];
-            const activeDayIndex = Math.max(0, weekDays.findIndex((d) => toDateKey(d) === activeWeekDateKey));
-            const activeDayTasks = displayedTasks.filter((t) => t.dueDate === activeWeekDateKey).sort((a, b) => (a.dueTime ?? "99:99").localeCompare(b.dueTime ?? "99:99"));
-
-            return (
-              <div className="week-mobile-day-view">
-                {/* Horizontal 7-Day Selector Bar */}
-                <div className="week-mobile-day-bar" role="tablist" aria-label="Select day of the week">
-                  {weekDays.map((day, i) => {
-                    const dKey = toDateKey(day);
-                    const isAct = dKey === activeWeekDateKey;
-                    const isTod = dKey === todayKey;
-                    const dayCount = displayedTasks.filter((t) => t.dueDate === dKey).length;
-                    return (
-                      <button
-                        key={dKey}
-                        type="button"
-                        role="tab"
-                        aria-selected={isAct}
-                        className={`week-mobile-day-chip ${isAct ? "is-active" : ""} ${isTod ? "is-today" : ""}`}
-                        onClick={() => {
-                          setSelectedDate(dKey);
-                          setNewDueDate(dKey);
-                        }}
-                      >
-                        <span className="week-mobile-chip-day">{orderedWeekDayNames[i]?.slice(0, 3)}</span>
-                        <span className="week-mobile-chip-num">{day.getDate()}</span>
-                        {dayCount > 0 && (
-                          <span className="week-mobile-chip-dot" title={`${dayCount} task(s)`} />
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Focused Active Day Task Card */}
-                <div className="week-mobile-focused-card neo-card">
-                  <div className="week-mobile-focused-header">
-                    <div>
-                      <span className="week-mobile-focused-kicker">
-                        {orderedWeekDayNames[activeDayIndex] ?? ""}
-                        {activeWeekDateKey === todayKey ? " · Today" : ""}
-                      </span>
-                      <h3 className="week-mobile-focused-title">
-                        {activeWeekDate.toLocaleDateString("en", { month: "long", day: "numeric", year: "numeric" })}
-                      </h3>
-                    </div>
-                    <button
-                      type="button"
-                      className="week-mobile-add-btn"
-                      onClick={() => openAddTask({ date: activeWeekDateKey, status: "open" })}
-                      aria-label={`Add task for ${orderedWeekDayNames[activeDayIndex]}`}
-                    >
-                      <Plus size={15} weight="bold" />
-                      <span>Add Task</span>
-                    </button>
-                  </div>
-
-                  <div className="week-mobile-tasks-list">
-                    {activeDayTasks.length === 0 ? (
-                      <div
-                        className="week-mobile-empty"
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => openAddTask({ date: activeWeekDateKey, status: "open" })}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            openAddTask({ date: activeWeekDateKey, status: "open" });
-                          }
-                        }}
-                      >
-                        <p>No tasks scheduled for this day.</p>
-                        <span className="week-mobile-empty-action">+ Tap here to add a task</span>
-                      </div>
-                    ) : (
-                      activeDayTasks.map((task) => (
-                        <div
-                          key={task.id}
-                          className={`week-mobile-task-card priority-accent-${task.priority} ${task.status === "completed" ? "is-done" : ""} ${task.isPinned ? "is-pinned" : ""}`}
-                          onClick={() => openTaskDetail(task)}
-                          role="button"
-                          tabIndex={0}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              openTaskDetail(task);
-                            }
-                          }}
-                        >
-                          <div className="week-mobile-task-main">
-                            <button
-                              type="button"
-                              className="week-mobile-task-toggle"
-                              aria-label={task.status === "completed" ? "Mark incomplete" : "Mark complete"}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                void toggleTask(task);
-                              }}
-                            >
-                              {task.status === "completed" ? (
-                                <CheckCircle size={20} weight="fill" color="#15803d" />
-                              ) : (
-                                <Circle size={20} color="#78716c" />
-                              )}
-                            </button>
-                            <div className="week-mobile-task-content">
-                              <div className="week-mobile-task-title-row">
-                                {task.isPinned && <span title="Pinned">📌</span>}
-                                <span className="week-mobile-task-title">{task.title}</span>
-                              </div>
-                              {task.dueTime && (
-                                <span className="week-mobile-task-time">
-                                  🕒 {new Date(`2000-01-01T${task.dueTime}`).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}
-                                </span>
-                              )}
-                              <div className="week-mobile-task-meta">
-                                {task.isGoogleEvent && (
-                                  <span
-                                    className="task-calendar-source-chip"
-                                    style={{
-                                      backgroundColor: `${task.googleCalendarColor || "#4285F4"}20`,
-                                      borderColor: task.googleCalendarColor || "#4285F4",
-                                      color: task.googleCalendarColor || "#1a73e8",
-                                    }}
-                                    title={`Google Calendar: ${task.googleCalendarName || "Event"}${task.isReadOnlyCalendar ? " (Read-only)" : ""}`}
-                                  >
-                                    📅 {task.googleCalendarName || "Google"}
-                                    {task.isReadOnlyCalendar && " 🔒"}
-                                  </span>
-                                )}
-                                <span className={`priority-badge-sm priority-${task.priority}`}>
-                                  {priorityEmoji(task.priority)} {priorityLabel(task.priority)}
-                                </span>
-                                {task.isPersonal && <span className="badge-chip badge-personal">🌿 Personal</span>}
-                                {task.timingPreference === "whenever" && <span className="badge-chip badge-whenever">🟢 Whenever</span>}
-                                {task.labelIds?.map((id) => {
-                                  const lbl = labels.find((l) => l.id === id);
-                                  return lbl ? <span key={id} className="task-label-chip">🏷️ {lbl.name}</span> : null;
-                                })}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="week-mobile-task-move" onClick={(e) => e.stopPropagation()}>
-                            <label className="kanban-move-label" aria-label={`Status for ${task.title}`}>
-                              <CaretDown size={11} />
-                              <select
-                                value={task.status}
-                                onChange={(e) => void moveTaskToStatus(task.id, e.target.value as PlannerTask["status"])}
-                              >
-                                <option value="open">To Do</option>
-                                <option value="in_progress">In Progress</option>
-                                <option value="completed">Done</option>
-                              </select>
-                            </label>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* Desktop 7-Column Timeline Grid (displayed on > 768px, hidden on mobile) */}
-          <div className="week-grid">
-          {weekDays.map((day, i) => {
-            const dateKey = toDateKey(day);
-            const isToday = dateKey === todayKey;
-            const isSelected = dateKey === selectedDate;
-            const dayTasks = displayedTasks.filter((t) => t.dueDate === dateKey).sort((a, b) => (a.dueTime ?? "99:99").localeCompare(b.dueTime ?? "99:99"));
-            return (
-              <div
-                className={`week-day-col ${isToday ? "week-today" : ""} ${isSelected ? "week-selected-day" : ""}`}
-                key={dateKey}
-                onClick={() => {
-                  if (selectedDate !== dateKey) {
-                    setSelectedDate(dateKey);
-                    setNewDueDate(dateKey);
-                  }
-                }}
-              >
-                <div className="week-day-header">
-                  <span className="week-day-name">{orderedWeekDayNames[i]}</span>
-                  <span className={`week-day-date ${isToday ? "today-badge" : ""} ${isSelected ? "selected-badge" : ""}`}>{day.getDate()}</span>
-                </div>
-                <div
-                  className="week-day-tasks"
-                  onClick={(e) => {
-                    if (e.target === e.currentTarget) {
-                      openAddTask({ date: dateKey, status: "open" });
-                    }
-                  }}
-                >
-                  {dayTasks.length === 0 && (
-                    <div
-                      className="week-empty week-empty-clickable"
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => openAddTask({ date: dateKey, status: "open" })}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          openAddTask({ date: dateKey, status: "open" });
-                        }
-                      }}
-                    >
-                      No tasks · + Add task
-                    </div>
-                  )}
-                  {dayTasks.map((task) => (
-                    <div
-                      className={`week-task-tile ${task.status === "completed" ? "is-done" : ""} ${task.isPinned ? "is-pinned" : ""} priority-accent-${task.priority}`}
-                      key={task.id}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => openTaskDetail(task)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          openTaskDetail(task);
-                        }
-                      }}
-                    >
-                      <button
-                        type="button"
-                        className="week-task-status-btn"
-                        aria-label={task.status === "completed" ? `Mark ${task.title} as incomplete` : `Mark ${task.title} as complete`}
-                        title={task.status === "completed" ? "Mark incomplete" : "Mark complete"}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void toggleTask(task);
-                        }}
-                      >
-                        {task.status === "completed" ? (
-                          <CheckCircle size={14} weight="fill" className="week-task-checked-icon" />
-                        ) : (
-                          <span className={`week-task-dot priority-dot-${task.priority}`} />
-                        )}
-                      </button>
-                      <div className="week-task-info">
-                        <div className="week-task-title-row">
-                          {task.isPinned && <span className="week-task-pin-icon" title="Pinned: Keep this task easy to find">📌</span>}
-                          <span className="week-task-title">{task.title}</span>
-                        </div>
-                        {task.dueTime && (
-                          <span className="week-task-time">
-                            {new Date(`2000-01-01T${task.dueTime}`).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}
-                          </span>
-                        )}
-                        <div className="week-task-badges">
-                          {task.isGoogleEvent && (
-                            <span
-                              className="task-calendar-source-chip"
-                              style={{
-                                backgroundColor: `${task.googleCalendarColor || "#4285F4"}20`,
-                                borderColor: task.googleCalendarColor || "#4285F4",
-                                color: task.googleCalendarColor || "#1a73e8",
-                              }}
-                              title={`Google Calendar: ${task.googleCalendarName || "Event"}${task.isReadOnlyCalendar ? " (Read-only)" : ""}`}
-                            >
-                              📅 {task.googleCalendarName || "Google"}
-                              {task.isReadOnlyCalendar && " 🔒"}
-                            </span>
-                          )}
-                          {task.isPersonal && <span className="badge-chip badge-personal" title="Personal: Optional category for life tasks">🌿 Personal</span>}
-                          {task.timingPreference === "whenever" && <span className="badge-chip badge-whenever" title="Whenever: No specific deadline">🟢 Whenever</span>}
-                          {task.labelIds && task.labelIds.length > 0 && task.labelIds.map((id) => {
-                            const labelObj = labels.find((l) => l.id === id);
-                            return labelObj ? (
-                              <span key={id} className="task-label-chip">🏷️ {labelObj.name}</span>
-                            ) : null;
-                          })}
-                        </div>
-                      </div>
-                      <span className={`priority-badge-sm priority-${task.priority}`}>{priorityEmoji(task.priority)} {priorityLabel(task.priority)}</span>
-                      <div className="kanban-tile-touch-move" onClick={(e) => e.stopPropagation()}>
-                        <label className="kanban-move-label" aria-label={`Status for ${task.title}`}>
-                          <CaretDown size={11} />
-                          <select
-                            value={task.status}
-                            onChange={(e) => void moveTaskToStatus(task.id, e.target.value as PlannerTask["status"])}
-                          >
-                            <option value="open">To Do</option>
-                            <option value="in_progress">In Progress</option>
-                            <option value="completed">Done</option>
-                          </select>
-                        </label>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="week-day-footer">
-                  <button
-                    type="button"
-                    className="week-add-task-btn"
-                    aria-label={`Add task for ${orderedWeekDayNames[i]}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openAddTask({ date: dateKey, status: "open" });
-                    }}
-                  >
-                    + Add task
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        </>
-      ) : (
-        <div className="weekly-kanban-board">
-          <div className="weekly-kanban-cols">
-            {kanbanColumns.map((col) => {
-              const colTasks = weekTasksByStatus[col.key];
-              return (
-                <div
-                  className={`weekly-kanban-col weekly-kanban-col-${col.key}`}
-                  key={col.key}
-                  onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add("kanban-drag-over"); }}
-                  onDragLeave={(e) => { e.currentTarget.classList.remove("kanban-drag-over"); }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    e.currentTarget.classList.remove("kanban-drag-over");
-                    const taskId = e.dataTransfer.getData("text/plain") || dragTaskId;
-                    if (taskId) void moveTaskToStatus(taskId, col.key);
-                    setDragTaskId(null);
-                  }}
-                >
-                  <div className="weekly-kanban-header">
-                    <div className="weekly-kanban-header-left">
-                      <span className={`kanban-status-dot kanban-dot-${col.key}`} />
-                      <span className="weekly-kanban-title">{col.label}</span>
-                    </div>
-                    <div className="weekly-kanban-header-actions">
-                      <span className="weekly-kanban-count">{colTasks.length}</span>
-                      <button
-                        type="button"
-                        className="kanban-col-add-btn"
-                        aria-label={`Add task to ${col.label}`}
-                        title={`Add task to ${col.label}`}
-                        onClick={() => openAddTask({ date: selectedDate || todayKey, status: col.key })}
-                      >
-                        <Plus size={13} weight="bold" />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="weekly-kanban-body">
-                    {colTasks.length === 0 && (
-                      <div className="weekly-kanban-empty">
-                        {col.key === "open" ? "No tasks to do this week" : col.key === "in_progress" ? "No tasks currently in progress" : "No completed tasks this week"}
-                      </div>
-                    )}
-                    {colTasks.map((task) => {
-                      const isTaskDateSelected = Boolean(task.dueDate && task.dueDate === selectedDate);
-                      const isTaskDateToday = Boolean(task.dueDate && task.dueDate === todayKey);
-                      return (
-                        <div
-                          className={`weekly-kanban-tile priority-accent-${task.priority} ${task.status === "completed" ? "is-done" : ""}`}
-                          key={task.id}
-                          draggable
-                          onDragStart={(e) => {
-                            e.dataTransfer.setData("text/plain", task.id);
-                            setDragTaskId(task.id);
-                          }}
-                          onDragEnd={() => setDragTaskId(null)}
-                        >
-                          <div className="weekly-kanban-tile-top">
-                            {task.dueDate && (
-                              <span className={`kanban-day-chip ${isTaskDateSelected ? "is-selected-date" : isTaskDateToday ? "is-today-date" : ""}`}>
-                                {isTaskDateSelected && <span aria-hidden="true">★ </span>}
-                                {new Date(task.dueDate + "T12:00:00").toLocaleDateString("en", { weekday: "short", month: "short", day: "numeric" })}
-                              </span>
-                            )}
-                            <span className="kanban-drag-handle" aria-hidden="true"><DotsSixVertical size={14} /></span>
-                          </div>
-                          <button
-                            type="button"
-                            className="weekly-kanban-tile-title"
-                            onClick={() => openTaskDetail(task)}
-                          >
-                            {task.title}
-                          </button>
-                          {task.labelIds && task.labelIds.length > 0 && (
-                            <div className="kanban-task-labels">
-                              {task.labelIds.map((id) => {
-                                const labelObj = labels.find((l) => l.id === id);
-                                return labelObj ? (
-                                  <span key={id} className="task-label-chip">🏷️ {labelObj.name}</span>
-                                ) : null;
-                              })}
-                            </div>
-                          )}
-                          <div className="weekly-kanban-tile-meta">
-                            <span className={`priority-badge-sm priority-${task.priority}`}>{priorityLabel(task.priority)}</span>
-                            {task.dueTime && (
-                              <span className="week-task-time">
-                                {new Date(`2000-01-01T${task.dueTime}`).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}
-                              </span>
-                            )}
-                            <div className="kanban-tile-touch-move">
-                              <label className="kanban-move-label" aria-label={`Move ${task.title}`}>
-                                <CaretDown size={11} />
-                                <select
-                                  value={task.status}
-                                  onChange={(e) => void moveTaskToStatus(task.id, e.target.value as PlannerTask["status"])}
-                                >
-                                  <option value="open">To Do</option>
-                                  <option value="in_progress">In Progress</option>
-                                  <option value="completed">Done</option>
-                                </select>
-                              </label>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                    <button
-                      type="button"
-                      className="kanban-col-add-bottom-btn"
-                      onClick={() => openAddTask({ date: selectedDate || todayKey, status: col.key })}
-                    >
-                      + Add task
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </section>
+  const renderWeeklyPlanner = (isYearSection = false, isWorkWeek = false) => (
+    <WeekView
+      weekDays={isWorkWeek ? workWeekDays : weekDays}
+      weeklyAnchorDate={weeklyAnchorDate}
+      today={today}
+      todayKey={todayKey}
+      selectedDate={selectedDate}
+      onSelectDate={(dateKey) => {
+        setSelectedDate(dateKey);
+        setNewDueDate(dateKey || "");
+        if (dateKey) {
+          const [y, m, d] = dateKey.split("-").map(Number);
+          setWeeklyAnchorDate(new Date(y, m - 1, d));
+          setMonthOffset(0);
+        }
+      }}
+      onNavigateWeek={(offset) => {
+        if (offset < 0) prevWeek();
+        else nextWeek();
+      }}
+      onResetToToday={todayWeek}
+      weekStartsOn={preferences.weekStartsOn}
+      resolvedTheme={resolvedTheme}
+      tasks={displayedTasks}
+      allCalendarConfigs={activeCalendarConfigs}
+      onAddTask={(options) =>
+        openAddTask({
+          date: options?.date || selectedDate || toDateKey(weeklyAnchorDate) || todayKey,
+          time: options?.time,
+          status: options?.status || "open",
+        })
+      }
+      onOpenTaskDetail={openTaskDetail}
+      onToggleMobileSidebar={() => setSidebarOpen((prev) => !prev)}
+      activeCalendarCount={activeCalendarCount}
+      currentView={view}
+      weeklyViewMode={weeklyViewMode}
+      onSwitchWeeklyMode={(m) => setWeeklyViewMode(m)}
+      onToggleTask={toggleTask}
+      onMoveTaskStatus={moveTaskToStatus}
+      labels={labels}
+      saveError={saveError}
+      onClearSaveError={() => setSaveError("")}
+      isYearSection={isYearSection}
+      sectionRef={isYearSection ? weeklyPlannerRef : undefined}
+      itemColors={preferences.itemColors ?? DEFAULT_ITEM_COLORS}
+      itemStyles={preferences.itemStyles ?? DEFAULT_ITEM_STYLES}
+    />
   );
 
   return <main
@@ -3966,26 +2265,24 @@ export default function HomePage() {
 
         <div className="topbar-actions">
           <UserProfileButton
-            onOpenPreferences={() => setPreferencesModalOpen(true)}
+            onOpenPreferences={() => openSettings("general")}
             showToast={showToast}
           />
           <button
             type="button"
-            className="header-preferences-btn"
-            onClick={() => setPreferencesModalOpen(true)}
+            className={`header-preferences-btn ${view === "settings" ? "is-active" : ""}`}
+            onClick={() => {
+              if (view === "settings") {
+                setView(previousView || "month");
+              } else {
+                openSettings(settingsSection);
+              }
+            }}
             aria-label="Planner preferences and customization"
             title="Planner preferences and customization"
           >
             <Gear size={17} weight="bold" />
             <span className="preferences-btn-label">Preferences</span>
-          </button>
-          <button
-            className="quick-add-fab"
-            onClick={() => openAddTask({ date: selectedDate || todayKey, status: "open" })}
-            aria-label="Add task"
-          >
-            <Plus size={18} weight="bold" />
-            <span className="add-task-label">Add Task</span>
           </button>
           <div
             className="date-chip"
@@ -4027,434 +2324,327 @@ export default function HomePage() {
     </header>
 
     <section className="main-panel">
-      <div className={view === "agenda" ? "content-grid" : "content-single"}>
-        {/* ===== DASHBOARD VIEW (Personal Planning Command Center) ===== */}
-        {view === "dashboard" && (
-          <DashboardView
-            tasks={tasks}
-            habits={habits}
-            checkIns={checkIns}
-            todayKey={todayKey}
-            selectedDate={selectedDate}
-            onSelectDate={(dateKey) => {
-              setSelectedDate(dateKey);
-              setNewDueDate(dateKey);
-            }}
-            onQuickAdd={(dateKey) => {
-              setSelectedDate(dateKey);
-              openAddTask({ date: dateKey, status: "open" });
-            }}
-            onToggleTask={(task) => void toggleTask(task)}
-            onEditTask={(task) => openTaskDetail(task)}
-            onDeleteTask={(task) => void deleteTask(task)}
-            onViewCalendar={() => setView("month")}
-            onOpenPreferences={() => setPreferencesModalOpen(true)}
-            onRestoreWidgets={() => {
-              savePreferences({
-                ...preferences,
-                dashboardWidgets: DEFAULT_DASHBOARD_WIDGETS.map((w) => ({ ...w })),
-              });
-              showToast("Restored default dashboard layout!");
-            }}
-            showToast={(msg) => {
-              showToast(msg);
-              void refreshHabits();
-            }}
-            onError={(err) => setSaveError(err)}
+      <div className="content-single">
+        {view === "settings" ? (
+          <SettingsWorkspace
+            activeSection={settingsSection}
+            onSelectSection={setSettingsSection}
+            onReturnToPlanner={() => setView(previousView || "month")}
+            preferences={preferences}
+            onSavePreferences={savePreferences}
             labels={labels}
-            weekDays={weekDays}
-            weekStartsOn={preferences.weekStartsOn}
-            resolvedTheme={resolvedTheme}
-            widgetConfigs={preferences.dashboardWidgets}
-            priorityLabel={(p) => priorityLabel(p, preferences)}
-            priorityEmoji={(p) => priorityEmoji(p, preferences)}
-            onHabitsChanged={() => void refreshHabits()}
+            onAddLabel={addLabel}
+            onDeleteLabel={deleteLabel}
+            onRestoreDefaults={handleRestoreDefaultPreferences}
+            onSyncGoogle={handleSyncGoogle}
+            isSyncingGoogle={isSyncingGoogle}
+            showToast={showToast}
+            onError={(err) => setSaveError(err)}
+            onExportBackup={exportBackup}
+            onImportBackup={importBackup}
+            taskTemplates={taskTemplates}
+            onDeleteTemplate={deleteTemplate}
           />
-        )}
+        ) : (
+          <CalendarWorkspaceShell
+            view={view}
+            sidebarOpen={sidebarOpen}
+            sidebarProps={{
+              currentShownDate: view === "month" ? shownDate : miniCalendarShownDate,
+              selectedDate,
+              onSelectDate: (dateKey) => {
+                setSelectedDate(dateKey);
+                setNewDueDate(dateKey || "");
+                if (dateKey) {
+                  const [y, m, d] = dateKey.split("-").map(Number);
+                  setWeeklyAnchorDate(new Date(y, m - 1, d));
+                  if (view === "year" || view === "yearline") {
+                    handleSelectYearDate(dateKey);
+                  } else if (view === "week" || view === "workWeek") {
+                    setMonthOffset(0);
+                  }
+                }
+              },
+              onNavigateMonth: (offset) => setMonthOffset((curr) => curr + offset),
+              weekStartsOn: preferences.weekStartsOn,
+              tasks,
+              onAddEvent: (dateKey) =>
+                openAddEvent({
+                  date: dateKey || selectedDate || (view === "week" || view === "workWeek" ? toDateKey(weeklyAnchorDate) : todayKey),
+                  time: "09:00",
+                }),
+              onAddTask: (dateKey) =>
+                openAddTask({
+                  date: dateKey || selectedDate || (view === "week" || view === "workWeek" ? toDateKey(weeklyAnchorDate) : todayKey),
+                }),
+              onAddAppointmentSchedule: (dateKey) =>
+                openAddAppointment({
+                  date: dateKey || selectedDate || (view === "week" || view === "workWeek" ? toDateKey(weeklyAnchorDate) : todayKey),
+                }),
+              localCalendarEnabled,
+              onToggleLocalCalendar: () => setLocalCalendarEnabled((prev) => !prev),
+              googleStatus,
+              calendarConfigs: activeCalendarConfigs,
+              onToggleCalendar: handleToggleCalendar,
+              onConnectGoogle: handleConnectGoogle,
+              onSyncGoogle: handleSyncGoogle,
+              isSyncingGoogle,
+              isOpenOnMobile: sidebarOpen,
+              onCloseMobile: () => setSidebarOpen(false),
+              isCollapsed: !sidebarOpen,
+              onToggleCollapse: handleToggleSidebar,
+              itemColors: preferences.itemColors ?? DEFAULT_ITEM_COLORS,
+              itemStyles: preferences.itemStyles ?? DEFAULT_ITEM_STYLES,
+            }}
+          >
+            {/* ===== DASHBOARD VIEW (Personal Planning Command Center) ===== */}
+            {view === "dashboard" && (
+              <DashboardView
+                tasks={displayedTasks}
+                habits={habits}
+                checkIns={checkIns}
+                todayKey={todayKey}
+                selectedDate={selectedDate}
+                onSelectDate={(dateKey) => {
+                  setSelectedDate(dateKey);
+                  setNewDueDate(dateKey);
+                }}
+                onQuickAdd={(dateKey) => {
+                  setSelectedDate(dateKey);
+                  openAddTask({ date: dateKey, status: "open" });
+                }}
+                onToggleTask={(task) => void toggleTask(task)}
+                onEditTask={(task) => openTaskDetail(task)}
+                onDeleteTask={(task) => void deleteTask(task)}
+                onViewCalendar={() => setView("month")}
+                onOpenPreferences={() => openSettings("dashboard")}
+              onRestoreWidgets={() => {
+                savePreferences({
+                  ...preferences,
+                  dashboardWidgets: DEFAULT_DASHBOARD_WIDGETS.map((w) => ({ ...w })),
+                });
+                showToast("Restored default dashboard layout!");
+              }}
+              showToast={(msg) => {
+                showToast(msg);
+                void refreshHabits();
+              }}
+              onError={(err) => setSaveError(err)}
+              labels={labels}
+              weekDays={weekDays}
+              weekStartsOn={preferences.weekStartsOn}
+              resolvedTheme={resolvedTheme}
+              widgetConfigs={preferences.dashboardWidgets}
+              onSaveWidgetConfigs={(nextWidgets) => {
+                savePreferences({
+                  ...preferences,
+                  dashboardWidgets: nextWidgets,
+                });
+              }}
+              priorityLabel={(p) => priorityLabel(p, preferences)}
+              priorityEmoji={(p) => priorityEmoji(p, preferences)}
+              onHabitsChanged={() => void refreshHabits()}
+              itemColors={preferences.itemColors ?? DEFAULT_ITEM_COLORS}
+              itemStyles={preferences.itemStyles ?? DEFAULT_ITEM_STYLES}
+              allCalendarConfigs={activeCalendarConfigs}
+            />
+          )}
 
-        {/* ===== YEAR VIEW (12-Month Calendar Overview + Selected Date Banner + Weekly Planner) ===== */}
-        {view === "year" && (
-          <div className="content-single">
-            <section
-              className="year-planner-card neo-card"
-              id="year-view"
-              style={{ backgroundColor: resolvedTheme.calendarBg }}
-            >
+          {/* ===== YEAR VIEW (12-Month Calendar Overview + Selected Date Banner + Weekly Planner) ===== */}
+          {view === "year" && (
+            <>
+              <YearView
+                shownYear={shownYear}
+                today={today}
+                todayKey={todayKey}
+                selectedDate={selectedDate}
+                onSelectDate={handleSelectYearDate}
+                onClearSelectedDate={() => setSelectedDate(null)}
+                onYearChange={handleYearChange}
+                weekStartsOn={preferences.weekStartsOn}
+                resolvedTheme={resolvedTheme}
+                tasks={displayedTasks}
+                allCalendarConfigs={activeCalendarConfigs}
+                activeCalendarCount={activeCalendarCount}
+                itemColors={preferences.itemColors ?? DEFAULT_ITEM_COLORS}
+                itemStyles={preferences.itemStyles ?? DEFAULT_ITEM_STYLES}
+              />
+              {/* Selected Date Quick Banner */}
+              {renderSelectedDateBanner()}
+              {/* Interactive Weekly Planner below year */}
+              {renderWeeklyPlanner(true)}
+            </>
+          )}
+
+          {/* ===== YEARLINE VIEW (Single Horizontal Row 12-Month Timeline + Selected Date Banner + Weekly Planner) ===== */}
+          {view === "yearline" && (
+            <>
+              {renderYearlineView()}
+              {/* Selected Date Quick Banner */}
+              {renderSelectedDateBanner()}
+              {/* Interactive Weekly Planner below year */}
+              {renderWeeklyPlanner(true)}
+            </>
+          )}
+
+          {/* ===== DAY VIEW ===== */}
+          {view === "day" && (
+            <DayView
+              currentDate={currentDayDate}
+              currentDateKey={selectedDate || todayKey}
+              today={today}
+              todayKey={todayKey}
+              onNavigateDay={handleNavigateDay}
+              onResetToToday={handleResetDayToToday}
+              onSelectDate={(dateKey) => {
+                setSelectedDate(dateKey);
+                setNewDueDate(dateKey);
+                const [y, m, d] = dateKey.split("-").map(Number);
+                setWeeklyAnchorDate(new Date(y, m - 1, d));
+              }}
+              resolvedTheme={resolvedTheme}
+              tasks={displayedTasks}
+              allCalendarConfigs={activeCalendarConfigs}
+              onAddTask={(options) =>
+                openAddTask({
+                  date: options?.date || selectedDate || todayKey,
+                  time: options?.time,
+                  status: options?.status || "open",
+                })
+              }
+              onOpenTaskDetail={openTaskDetail}
+              activeCalendarCount={activeCalendarCount}
+              currentView={view}
+              itemColors={preferences.itemColors ?? DEFAULT_ITEM_COLORS}
+              itemStyles={preferences.itemStyles ?? DEFAULT_ITEM_STYLES}
+            />
+          )}
+
+          {/* ===== WEEK VIEW ===== */}
+          {view === "week" && renderWeeklyPlanner(false, false)}
+
+          {/* ===== WORK WEEKS VIEW ===== */}
+          {view === "workWeek" && renderWeeklyPlanner(false, true)}
+
+          {/* ===== KANBAN VIEW ===== */}
+          {view === "kanban" && (
+            <section className="kanban-board neo-card" id="kanban-view">
               <div className="card-header">
                 <div>
-                  <span className="section-kicker">FULL YEAR CALENDAR</span>
-                  <h2>{shownYear} Yearly Planner</h2>
-                </div>
-                <div className="calendar-actions">
-                  <button type="button" className="icon-button" aria-label="Previous year" onClick={() => setYearOffset((y) => y - 1)}>←</button>
-                  <button type="button" className="icon-button today-btn" onClick={() => setYearOffset(0)}>This Year</button>
-                  <button type="button" className="icon-button" aria-label="Next year" onClick={() => setYearOffset((y) => y + 1)}>→</button>
+                  <span className="section-kicker">TASK BOARD</span>
+                  <h2>Kanban<span className="heading-period">.</span></h2>
                 </div>
               </div>
-
-              <div className="year-planner-grid">
-                {Array.from({ length: 12 }, (_, monthIndex) => {
-                  const monthDate = new Date(shownYear, monthIndex, 1);
-                  const monthTitle = monthDate.toLocaleDateString("en", { month: "long" });
-                  const gridDays = monthGridDays(shownYear, monthIndex, preferences.weekStartsOn);
-                  const monthColor = getMonthColor(resolvedTheme, monthIndex);
-                  const isTileMode = resolvedTheme.mode === "tiles";
-
+              <div className="kanban-columns">
+                {kanbanColumns.map((col) => {
+                  const colTasks = tasksByStatus[col.key];
                   return (
                     <div
-                      className={`year-month-card ${isTileMode ? "is-tile-tinted" : ""}`}
-                      key={monthIndex}
-                      style={isTileMode ? { backgroundColor: monthColor.tileBg, borderColor: monthColor.border } : undefined}
+                      className={`kanban-col kanban-col-${col.key}`}
+                      key={col.key}
+                      onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add("kanban-drag-over"); }}
+                      onDragLeave={(e) => { e.currentTarget.classList.remove("kanban-drag-over"); }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        e.currentTarget.classList.remove("kanban-drag-over");
+                        const taskId = e.dataTransfer.getData("text/plain") || dragTaskId;
+                        if (taskId) void moveTaskToStatus(taskId, col.key);
+                        setDragTaskId(null);
+                      }}
                     >
-                      <div
-                        className="year-month-header"
-                        style={{
-                          backgroundColor: monthColor.bg,
-                          borderColor: monthColor.border,
-                          color: monthColor.text,
-                        }}
-                      >
-                        <span className="year-month-title" style={{ color: monthColor.text }}>{monthTitle}</span>
-                        <span className="year-month-num" style={{ color: monthColor.text }}>{String(monthIndex + 1).padStart(2, "0")}</span>
+                      <div className="kanban-col-header">
+                        <div className="kanban-col-header-left">
+                          <span className={`kanban-status-dot kanban-dot-${col.key}`} />
+                          <span className="kanban-col-title">{col.label}</span>
+                        </div>
+                        <div className="kanban-col-header-actions">
+                          <span className="kanban-col-count">{colTasks.length}</span>
+                          <button
+                            type="button"
+                            className="kanban-col-add-btn"
+                            aria-label={`Add task to ${col.label}`}
+                            title={`Add task to ${col.label}`}
+                            onClick={() => openAddTask({ date: selectedDate || todayKey, status: col.key })}
+                          >
+                            <Plus size={13} weight="bold" />
+                          </button>
+                        </div>
                       </div>
-                      <div className="year-mini-weekdays">
-                        {orderedMiniDayNames.map((w, idx) => {
-                          const isWeekendDay = w === "S";
+                      <div className="kanban-col-body">
+                        {colTasks.length === 0 && (
+                          <div className="kanban-empty">
+                            {col.key === "open" ? "Add a task to get started" : col.key === "in_progress" ? "Drag tasks here when you start working" : "Completed tasks show up here"}
+                          </div>
+                        )}
+                        {colTasks.map((task) => {
+                          const tileStyle = getItemTileStyle(task, preferences.itemStyles, activeCalendarConfigs);
+                          const iType = getItemType(task);
+                          const isAppt = iType === "appointment";
+                          const isEvt = iType === "event";
                           return (
-                            <span key={idx} className={`year-mini-weekday ${isWeekendDay ? "is-weekend" : ""}`}>
-                              {w}
-                            </span>
-                          );
-                        })}
-                      </div>
-                      <div className="year-mini-grid">
-                        {gridDays.map((dayNum, cellIndex) => {
-                          if (!dayNum) {
-                            return <div key={`empty-${cellIndex}`} className="year-mini-day empty" />;
-                          }
-                          const dateKey = `${shownYear}-${String(monthIndex + 1).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}`;
-                          const dayDate = new Date(shownYear, monthIndex, dayNum);
-                          const isWeekend = dayDate.getDay() === 0 || dayDate.getDay() === 6;
-                          const isToday = dateKey === todayKey;
-                          const isSelected = dateKey === selectedDate;
-                          const dueTasks = displayedTasks.filter((t) => t.dueDate === dateKey);
-                          const hasTasks = dueTasks.length > 0;
-                          const openCount = dueTasks.filter((t) => t.status !== "completed").length;
-
-                          return (
-                            <button
-                              type="button"
-                              key={dateKey}
-                              className={`year-mini-day ${isToday ? "today" : ""} ${isSelected ? "selected" : ""} ${isWeekend ? "is-weekend" : ""} ${hasTasks ? "has-tasks" : ""}`}
-                              style={{
-                                ...(isToday ? { backgroundColor: resolvedTheme.todayBg } : {}),
-                                ...(isSelected && !isToday ? { backgroundColor: resolvedTheme.selectedBg } : {}),
-                                ...(isWeekend && !isToday && !isSelected ? { backgroundColor: resolvedTheme.weekendBg } : {}),
+                            <div
+                              className={`kanban-tile ${tileStyle.className} priority-accent-${task.priority} ${task.isPinned ? "is-pinned" : ""}`}
+                              key={task.id}
+                              style={{ ...tileStyle.style }}
+                              draggable
+                              onDragStart={(e) => {
+                                e.dataTransfer.setData("text/plain", task.id);
+                                setDragTaskId(task.id);
                               }}
-                              onClick={() => handleSelectYearDate(dateKey)}
-                              title={`${monthTitle} ${dayNum}, ${shownYear}${isWeekend ? " (Weekend)" : ""}${hasTasks ? ` · ${dueTasks.length} task(s) (${openCount} open)` : ""}`}
-                              aria-label={`${monthTitle} ${dayNum}, ${shownYear}${isWeekend ? " (Weekend)" : ""}${hasTasks ? ` (${dueTasks.length} tasks)` : ""}`}
-                              aria-pressed={isSelected}
+                              onDragEnd={() => setDragTaskId(null)}
                             >
-                              <span className="year-mini-day-num">{dayNum}</span>
-                              {hasTasks && (
-                                <span className="year-mini-dot-wrapper">
-                                  {dueTasks.length === 1 ? (
-                                    <span
-                                      className={`year-mini-dot priority-dot-${dueTasks[0].priority}`}
-                                      style={{ borderColor: resolvedTheme.taskDotColor }}
-                                    />
-                                  ) : (
-                                    <span
-                                      className="year-mini-badge"
-                                      style={{ borderColor: resolvedTheme.taskDotColor }}
-                                    >
-                                      {dueTasks.length > 9 ? "9+" : dueTasks.length}
-                                    </span>
-                                  )}
-                                </span>
-                              )}
-                            </button>
+                              <div className="kanban-tile-top">
+                                <span className="kanban-drag-handle" aria-hidden="true"><DotsSixVertical size={14} /></span>
+                                {task.isPinned && <span className="kanban-pin-badge" title="Pinned: Keep this task easy to find">📌</span>}
+                                <button type="button" className="kanban-tile-title" onClick={() => openTaskDetail(task)}>{task.title}</button>
+                              </div>
+                              <div className="kanban-tile-meta">
+                                <div className="kanban-badges-group">
+                                  {isAppt && <span className="badge-chip" style={{ backgroundColor: "#fef3c7", color: "#92400e", border: "1px solid #fde68a" }}>⏱️ Schedule</span>}
+                                  {isEvt && <span className="badge-chip" style={{ backgroundColor: "#e0f2fe", color: "#0369a1", border: "1px solid #bae6fd" }}>📅 Event</span>}
+                                  {task.isPersonal && <span className="badge-chip badge-personal" title="Personal: Optional category for life tasks">🌿 Personal</span>}
+                                  {task.timingPreference === "whenever" && <span className="badge-chip badge-whenever" title="Whenever: No specific deadline">🟢 Whenever</span>}
+                                  {task.labelIds && task.labelIds.length > 0 && task.labelIds.map((id) => {
+                                    const labelObj = labels.find((l) => l.id === id);
+                                    return labelObj ? (
+                                      <span key={id} className="task-label-chip">🏷️ {labelObj.name}</span>
+                                    ) : null;
+                                  })}
+                                  <span className={`priority-badge-sm priority-${task.priority}`}>{priorityEmoji(task.priority)} {priorityLabel(task.priority)}</span>
+                                </div>
+                                {task.dueDate && <span className={`kanban-due ${isOverdue(task) ? "overdue" : ""}`}>{isOverdue(task) ? "Overdue · " : ""}{new Date(task.dueDate + "T12:00:00").toLocaleDateString("en", { month: "short", day: "numeric" })}</span>}
+                              </div>
+                              {/* Touch-friendly status selector */}
+                              <div className="kanban-tile-touch-move">
+                                <label className="kanban-move-label" aria-label={`Move ${task.title}`}>
+                                  <CaretDown size={12} />
+                                  <select value={task.status} onChange={(e) => void moveTaskToStatus(task.id, e.target.value as PlannerTask["status"])}>
+                                    <option value="open">To Do</option>
+                                    <option value="in_progress">In Progress</option>
+                                    <option value="completed">Done</option>
+                                  </select>
+                                </label>
+                              </div>
+                            </div>
                           );
                         })}
+                        <button
+                          type="button"
+                          className="kanban-col-add-bottom-btn"
+                          onClick={() => openAddTask({ date: selectedDate || todayKey, status: col.key })}
+                        >
+                          + Add task
+                        </button>
                       </div>
                     </div>
                   );
                 })}
               </div>
-
-              <div className="year-legend-bar">
-                <span className="year-legend-item">
-                  <span className="year-legend-swatch today" style={{ backgroundColor: resolvedTheme.todayBg }} /> Today
-                </span>
-                <span className="year-legend-item">
-                  <span className="year-legend-swatch selected" style={{ backgroundColor: resolvedTheme.selectedBg }} /> Selected
-                </span>
-                <span className="year-legend-item">
-                  <span className="year-legend-swatch tasks" style={{ backgroundColor: resolvedTheme.taskDotColor }} /> Has Tasks
-                </span>
-                <button
-                  type="button"
-                  className="clear-date-button"
-                  onClick={() => { setSelectedDate(null); }}
-                  disabled={!selectedDate}
-                >
-                  Clear selection
-                </button>
-                <span className="year-legend-hint">Click any date to open its week below ✳</span>
-              </div>
             </section>
+          )}
 
-            {/* Selected Date Quick Banner */}
-            {renderSelectedDateBanner()}
-
-            {/* Interactive Weekly Kanban Planner below year */}
-            {renderWeeklyPlanner(true)}
-          </div>
-        )}
-
-        {/* ===== YEARLINE VIEW (Single Horizontal Row 12-Month Timeline + Selected Date Banner + Weekly Planner) ===== */}
-        {view === "yearline" && (
-          <div className="content-single">
-            {renderYearlineView()}
-          </div>
-        )}
-
-        {/* ===== DAY VIEW ===== */}
-        {view === "day" && (
-          <div className="month-workspace-container day-workspace-container">
-            <CalendarSidebar
-              currentShownDate={miniCalendarShownDate}
-              selectedDate={selectedDate || todayKey}
-              onSelectDate={(dateKey) => {
-                setSelectedDate(dateKey);
-                setNewDueDate(dateKey || "");
-                if (dateKey) {
-                  const [y, m, d] = dateKey.split("-").map(Number);
-                  setWeeklyAnchorDate(new Date(y, m - 1, d));
-                }
-              }}
-              onNavigateMonth={(offset) => setMonthOffset((curr) => curr + offset)}
-              weekStartsOn={preferences.weekStartsOn}
-              tasks={tasks}
-              onAddEvent={(dateKey) => openAddTask({ date: dateKey || selectedDate || todayKey, time: "09:00", status: "open" })}
-              onAddTask={(dateKey) => openAddTask({ date: dateKey || selectedDate || todayKey, status: "open" })}
-              localCalendarEnabled={localCalendarEnabled}
-              onToggleLocalCalendar={() => setLocalCalendarEnabled((prev) => !prev)}
-              googleStatus={googleStatus}
-              calendarConfigs={activeCalendarConfigs}
-              onToggleCalendar={handleToggleCalendar}
-              onConnectGoogle={handleConnectGoogle}
-              onSyncGoogle={handleSyncGoogle}
-              isSyncingGoogle={isSyncingGoogle}
-              isOpenOnMobile={mobileSidebarOpen}
-              onCloseMobile={() => setMobileSidebarOpen(false)}
-            />
-            <div className="day-workspace-main">
-              <DayView
-                currentDate={currentDayDate}
-                currentDateKey={selectedDate || todayKey}
-                today={today}
-                todayKey={todayKey}
-                onNavigateDay={handleNavigateDay}
-                onResetToToday={handleResetDayToToday}
-                onSelectDate={(dateKey) => {
-                  setSelectedDate(dateKey);
-                  setNewDueDate(dateKey);
-                  const [y, m, d] = dateKey.split("-").map(Number);
-                  setWeeklyAnchorDate(new Date(y, m - 1, d));
-                }}
-                resolvedTheme={resolvedTheme}
-                tasks={displayedTasks}
-                allCalendarConfigs={activeCalendarConfigs}
-                onAddTask={(options) =>
-                  openAddTask({
-                    date: options?.date || selectedDate || todayKey,
-                    time: options?.time,
-                    status: options?.status || "open",
-                  })
-                }
-                onOpenTaskDetail={openTaskDetail}
-                onToggleMobileSidebar={() => setMobileSidebarOpen((prev) => !prev)}
-                activeCalendarCount={activeCalendarCount}
-                currentView={view}
-                onSwitchView={(v) => setView(v)}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* ===== WEEK VIEW ===== */}
-        {view === "week" && (
-          <div className="month-workspace-container week-workspace-container">
-            <CalendarSidebar
-              currentShownDate={miniCalendarShownDate}
-              selectedDate={selectedDate}
-              onSelectDate={(dateKey) => {
-                setSelectedDate(dateKey);
-                setNewDueDate(dateKey || "");
-                if (dateKey) {
-                  const [y, m, d] = dateKey.split("-").map(Number);
-                  const clicked = new Date(y, m - 1, d);
-                  setWeeklyAnchorDate(clicked);
-                }
-              }}
-              onNavigateMonth={(offset) => setMonthOffset((curr) => curr + offset)}
-              weekStartsOn={preferences.weekStartsOn}
-              tasks={tasks}
-              onAddEvent={(dateKey) => openAddTask({ date: dateKey || selectedDate || toDateKey(weeklyAnchorDate) || todayKey, status: "open" })}
-              onAddTask={(dateKey) => openAddTask({ date: dateKey || selectedDate || toDateKey(weeklyAnchorDate) || todayKey, status: "open" })}
-              localCalendarEnabled={localCalendarEnabled}
-              onToggleLocalCalendar={() => setLocalCalendarEnabled((prev) => !prev)}
-              googleStatus={googleStatus}
-              calendarConfigs={activeCalendarConfigs}
-              onToggleCalendar={handleToggleCalendar}
-              onConnectGoogle={handleConnectGoogle}
-              onSyncGoogle={handleSyncGoogle}
-              isSyncingGoogle={isSyncingGoogle}
-              isOpenOnMobile={mobileSidebarOpen}
-              onCloseMobile={() => setMobileSidebarOpen(false)}
-            />
-            <div className="week-workspace-main">
-              {renderWeeklyPlanner(false)}
-            </div>
-          </div>
-        )}
-
-        {/* ===== KANBAN VIEW ===== */}
-        {view === "kanban" && (
-          <section className="kanban-board neo-card" id="kanban-view">
-            <div className="card-header">
-              <div>
-                <span className="section-kicker">TASK BOARD</span>
-                <h2>Kanban<span className="heading-period">.</span></h2>
-              </div>
-            </div>
-            <div className="kanban-columns">
-              {kanbanColumns.map((col) => {
-                const colTasks = tasksByStatus[col.key];
-                return (
-                  <div
-                    className={`kanban-col kanban-col-${col.key}`}
-                    key={col.key}
-                    onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add("kanban-drag-over"); }}
-                    onDragLeave={(e) => { e.currentTarget.classList.remove("kanban-drag-over"); }}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      e.currentTarget.classList.remove("kanban-drag-over");
-                      const taskId = e.dataTransfer.getData("text/plain") || dragTaskId;
-                      if (taskId) void moveTaskToStatus(taskId, col.key);
-                      setDragTaskId(null);
-                    }}
-                  >
-                    <div className="kanban-col-header">
-                      <div className="kanban-col-header-left">
-                        <span className={`kanban-status-dot kanban-dot-${col.key}`} />
-                        <span className="kanban-col-title">{col.label}</span>
-                      </div>
-                      <div className="kanban-col-header-actions">
-                        <span className="kanban-col-count">{colTasks.length}</span>
-                        <button
-                          type="button"
-                          className="kanban-col-add-btn"
-                          aria-label={`Add task to ${col.label}`}
-                          title={`Add task to ${col.label}`}
-                          onClick={() => openAddTask({ date: selectedDate || todayKey, status: col.key })}
-                        >
-                          <Plus size={13} weight="bold" />
-                        </button>
-                      </div>
-                    </div>
-                    <div className="kanban-col-body">
-                      {colTasks.length === 0 && (
-                        <div className="kanban-empty">
-                          {col.key === "open" ? "Add a task to get started" : col.key === "in_progress" ? "Drag tasks here when you start working" : "Completed tasks show up here"}
-                        </div>
-                      )}
-                      {colTasks.map((task) => (
-                        <div
-                          className={`kanban-tile priority-accent-${task.priority} ${task.isPinned ? "is-pinned" : ""}`}
-                          key={task.id}
-                          draggable
-                          onDragStart={(e) => {
-                            e.dataTransfer.setData("text/plain", task.id);
-                            setDragTaskId(task.id);
-                          }}
-                          onDragEnd={() => setDragTaskId(null)}
-                        >
-                          <div className="kanban-tile-top">
-                            <span className="kanban-drag-handle" aria-hidden="true"><DotsSixVertical size={14} /></span>
-                            {task.isPinned && <span className="kanban-pin-badge" title="Pinned: Keep this task easy to find">📌</span>}
-                            <button type="button" className="kanban-tile-title" onClick={() => openTaskDetail(task)}>{task.title}</button>
-                          </div>
-                          <div className="kanban-tile-meta">
-                            <div className="kanban-badges-group">
-                              {task.isPersonal && <span className="badge-chip badge-personal" title="Personal: Optional category for life tasks">🌿 Personal</span>}
-                              {task.timingPreference === "whenever" && <span className="badge-chip badge-whenever" title="Whenever: No specific deadline">🟢 Whenever</span>}
-                              {task.labelIds && task.labelIds.length > 0 && task.labelIds.map((id) => {
-                                const labelObj = labels.find((l) => l.id === id);
-                                return labelObj ? (
-                                  <span key={id} className="task-label-chip">🏷️ {labelObj.name}</span>
-                                ) : null;
-                              })}
-                              <span className={`priority-badge-sm priority-${task.priority}`}>{priorityEmoji(task.priority)} {priorityLabel(task.priority)}</span>
-                            </div>
-                            {task.dueDate && <span className={`kanban-due ${isOverdue(task) ? "overdue" : ""}`}>{isOverdue(task) ? "Overdue · " : ""}{new Date(task.dueDate + "T12:00:00").toLocaleDateString("en", { month: "short", day: "numeric" })}</span>}
-                          </div>
-                          {/* Touch-friendly status selector */}
-                          <div className="kanban-tile-touch-move">
-                            <label className="kanban-move-label" aria-label={`Move ${task.title}`}>
-                              <CaretDown size={12} />
-                              <select value={task.status} onChange={(e) => void moveTaskToStatus(task.id, e.target.value as PlannerTask["status"])}>
-                                <option value="open">To Do</option>
-                                <option value="in_progress">In Progress</option>
-                                <option value="completed">Done</option>
-                              </select>
-                            </label>
-                          </div>
-                        </div>
-                      ))}
-                      <button
-                        type="button"
-                        className="kanban-col-add-bottom-btn"
-                        onClick={() => openAddTask({ date: selectedDate || todayKey, status: col.key })}
-                      >
-                        + Add task
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        )}
-
-        {/* ===== GOOGLE CALENDAR-STYLE MONTH WORKSPACE ===== */}
-        {view === "month" && (
-          <div className="month-workspace-container">
-            <CalendarSidebar
-              currentShownDate={shownDate}
-              selectedDate={selectedDate}
-              onSelectDate={(dateKey) => {
-                setSelectedDate(dateKey);
-                setNewDueDate(dateKey || "");
-              }}
-              onNavigateMonth={(offset) => setMonthOffset((curr) => curr + offset)}
-              weekStartsOn={preferences.weekStartsOn}
-              tasks={tasks}
-              onAddEvent={(dateKey) => openAddTask({ date: dateKey || selectedDate || todayKey, status: "open" })}
-              onAddTask={(dateKey) => openAddTask({ date: dateKey || selectedDate || todayKey, status: "open" })}
-              localCalendarEnabled={localCalendarEnabled}
-              onToggleLocalCalendar={() => setLocalCalendarEnabled((prev) => !prev)}
-              googleStatus={googleStatus}
-              calendarConfigs={activeCalendarConfigs}
-              onToggleCalendar={handleToggleCalendar}
-              onConnectGoogle={handleConnectGoogle}
-              onSyncGoogle={handleSyncGoogle}
-              isSyncingGoogle={isSyncingGoogle}
-              isOpenOnMobile={mobileSidebarOpen}
-              onCloseMobile={() => setMobileSidebarOpen(false)}
-            />
+          {/* ===== GOOGLE CALENDAR-STYLE MONTH WORKSPACE ===== */}
+          {view === "month" && (
             <MonthView
               shownDate={shownDate}
               today={today}
@@ -4476,514 +2666,226 @@ export default function HomePage() {
               allCalendarConfigs={activeCalendarConfigs}
               onAddTask={(options) => openAddTask({ date: options?.date || selectedDate || todayKey, time: options?.time, status: options?.status || "open" })}
               onOpenTaskDetail={openTaskDetail}
-              onToggleMobileSidebar={() => setMobileSidebarOpen((prev) => !prev)}
               activeCalendarCount={activeCalendarCount}
+              itemColors={preferences.itemColors ?? DEFAULT_ITEM_COLORS}
+              itemStyles={preferences.itemStyles ?? DEFAULT_ITEM_STYLES}
             />
-          </div>
-        )}
+          )}
 
-        {/* ===== EXISTING AGENDA CALENDAR CARD ===== */}
-        {view === "agenda" && (
-          <section
-            className="calendar-card neo-card"
-            id="calendar"
-            style={{ backgroundColor: resolvedTheme.calendarBg }}
-          >
-            <div className="card-header">
-              <div>
-                <span className="section-kicker">THE BIG PICTURE</span>
-                <h2>Agenda</h2>
-              </div>
-              <div className="calendar-actions">
-                <button
-                  type="button"
-                  className="agenda-add-task-header-btn"
-                  onClick={() => openAddTask({ date: selectedDate || todayKey, status: "open" })}
-                >
-                  <Plus size={14} weight="bold" />
-                  <span>Add Task</span>
-                </button>
-              </div>
-            </div>
-            <div className="agenda-list">
-              {displayedTasks.filter((task) => task.dueDate).slice().sort((a, b) => {
-                const aPinned = a.isPinned ? 1 : 0;
-                const bPinned = b.isPinned ? 1 : 0;
-                if (aPinned !== bPinned) return bPinned - aPinned;
-                return (a.dueDate ?? "").localeCompare(b.dueDate ?? "") || (a.dueTime ?? "99:99").localeCompare(b.dueTime ?? "99:99");
-              }).map((task) => (
-                <button type="button" className={"agenda-item " + (task.status === "completed" ? "is-done" : "") + (task.isPinned ? " is-pinned" : "")} key={task.id} onClick={() => openTaskDetail(task)}>
-                  <span className="agenda-date">{new Date(task.dueDate + "T12:00:00").toLocaleDateString("en", { month: "short", day: "numeric" })}</span>
-                  <span className="agenda-task-title">
-                    <span className="agenda-task-name">
-                      {task.isPinned && <span className="task-row-pin" title="Pinned">📌</span>}
-                      {task.title}
-                    </span>
-                    <small>{task.dueTime ? new Date("2000-01-01T" + task.dueTime).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" }) : "All day"}{task.status === "completed" ? " · Completed" : ""}</small>
-                  </span>
-                  <div className="agenda-badges">
-                    {task.isPersonal && <span className="badge-chip badge-personal" title="Personal: Optional category for life tasks">🌿 Personal</span>}
-                    {task.timingPreference === "whenever" && <span className="badge-chip badge-whenever" title="Whenever: No specific deadline">🟢 Whenever</span>}
-                    {task.labelIds && task.labelIds.length > 0 && task.labelIds.map((id) => {
-                      const labelObj = labels.find((l) => l.id === id);
-                      return labelObj ? (
-                        <span key={id} className="task-label-chip">🏷️ {labelObj.name}</span>
-                      ) : null;
-                    })}
-                    <span className={"priority-badge priority-" + task.priority}>{priorityEmoji(task.priority)} {priorityLabel(task.priority)}</span>
-                  </div>
-                </button>
-              ))}
-              {tasks.every((task) => !task.dueDate) && (
-                <div className="agenda-empty-state">
-                  <p className="empty-tasks">Add a due date to a task and it will appear here.</p>
-                  <button
-                    type="button"
-                    className="agenda-add-task-header-btn"
-                    onClick={() => openAddTask({ date: selectedDate || todayKey, status: "open" })}
-                  >
-                    <Plus size={14} weight="bold" />
-                    <span>Add Task</span>
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className="calendar-footer">
-              <span className="legend"><i className="day-dot pink" /> Tasks due</span>
-              <button type="button" className="clear-date-button" onClick={() => { setSelectedDate(null); }} disabled={!selectedDate}>Clear date</button>
-              <span className="footer-hint">Select a day to filter tasks or add a task ✳</span>
-            </div>
-          </section>
-        )}
-
-        {/* Selected Date Quick Banner for Agenda view */}
-        {view === "agenda" && selectedDate && renderSelectedDateBanner()}
-
-        {/* ===== DASHBOARD SIDEBAR (Daily Habits + Tasks, visible only in agenda view) ===== */}
-        {view === "agenda" && (
-          <div className="dashboard-sidebar">
-            <DailyHabitsWidget
+          {/* ===== AGENDA VIEW (Google Calendar Shared Sidebar + Chronological Schedule) ===== */}
+          {view === "agenda" && (
+            <AgendaView
+              today={today}
               todayKey={todayKey}
-              onNotify={showToast}
-              onError={(err) => setSaveError(err)}
+              selectedDate={selectedDate}
+              onSelectDate={(dateKey) => {
+                setSelectedDate(dateKey);
+                setNewDueDate(dateKey || "");
+                if (dateKey) {
+                  const [y, m, d] = dateKey.split("-").map(Number);
+                  setWeeklyAnchorDate(new Date(y, m - 1, d));
+                  setMonthOffset(0);
+                }
+              }}
+              tasks={displayedTasks}
+              allTasksCount={tasks.length}
+              allCalendarConfigs={activeCalendarConfigs}
+              labels={labels}
+              resolvedTheme={resolvedTheme}
+              priorityLabel={(p) => priorityLabel(p, preferences)}
+              priorityEmoji={(p) => priorityEmoji(p, preferences)}
+              onOpenTaskDetail={openTaskDetail}
+              onAddTask={(options) =>
+                openAddTask({
+                  date: options?.date || selectedDate || todayKey,
+                  time: options?.time,
+                  status: options?.status || "open",
+                })
+              }
+              onToggleTask={(task) => void toggleTask(task)}
+              activeCalendarCount={activeCalendarCount}
+              itemColors={preferences.itemColors ?? DEFAULT_ITEM_COLORS}
+              itemStyles={preferences.itemStyles ?? DEFAULT_ITEM_STYLES}
             />
-            <section className="tasks-card neo-card" id="tasks"><div className="tasks-top"><div><span className="section-kicker">ONE THING AT A TIME</span><h2>Little wins<span className="heading-period">.</span></h2></div><span className="task-progress">{completed}/{tasks.length}</span></div><div className="progress-track"><span style={{ width: (tasks.length ? (completed / tasks.length) * 100 : 0) + "%" }} /></div><p className="tasks-subtitle">{loaded ? "Saved on this device · your progress stays here." : "Loading your saved tasks…"}</p>
-            <div className="label-manager">
-              <div className="label-manager-heading"><strong>Labels</strong><button type="button" className="task-action" onClick={() => void addLabel()}>+ Add label</button></div>
-              <div className="label-chip-list">{labels.map((label) => <span className="label-management-chip" key={label.id}>{label.name}<button type="button" aria-label={`Delete ${label.name} label`} onClick={() => deleteLabel(label.id)}>×</button></span>)}</div>
-            </div>
-            <div className="planner-preferences" aria-label="Planner preferences">
-              <div className="label-manager-heading">
-                <strong>Planner preferences</strong>
-                <button
-                  type="button"
-                  className="task-action"
-                  onClick={() => setPreferencesModalOpen(true)}
-                >
-                  Customize options →
-                </button>
-              </div>
-              <div className="preference-quick-summary">
-                <span className="preference-chip">Theme: {THEME_PRESET_METADATA[resolvedTheme.preset]?.name ?? resolvedTheme.preset}</span>
-                <span className="preference-chip">Mode: {resolvedTheme.mode === "headers" ? "Colored Headers" : resolvedTheme.mode === "tiles" ? "Colored Tiles" : "Custom"}</span>
-                <span className="preference-chip">Start: {preferences.weekStartsOn === 0 ? "Sun" : preferences.weekStartsOn === 1 ? "Mon" : "Sat"}</span>
-                <span className="preference-chip">Sort: {preferences.defaultSort}</span>
-                <span className="preference-chip">Default: {priorityEmoji(preferences.defaultPriority ?? "none", preferences)} {priorityLabel(preferences.defaultPriority ?? "none", preferences)}</span>
-              </div>
-              <div className="preference-fields">
-                <label>Week starts on<select aria-label="Week starts on" value={preferences.weekStartsOn} onChange={(event) => savePreferences({ ...preferences, weekStartsOn: Number(event.target.value) as PlannerPreferences["weekStartsOn"] })}><option value={0}>Sunday</option><option value={1}>Monday</option><option value={6}>Saturday</option></select></label>
-                <label>Default task sorting<select aria-label="Default task sorting" value={preferences.defaultSort} onChange={(event) => { const defaultSort = event.target.value as PlannerPreferences["defaultSort"]; savePreferences({ ...preferences, defaultSort }); setTaskSort(defaultSort); }}><option value="due">Due date</option><option value="priority">Priority</option><option value="newest">Newest first</option></select></label>
-              </div>
-            </div>
-            <div className="backup-tools" aria-label="Backup and restore">
-              <div><strong>Backup your planner</strong><p>Export tasks, labels, projects, and templates to a JSON file.</p></div>
-              <div className="backup-actions"><button type="button" className="task-action" onClick={exportBackup}>Export backup</button><label className="task-action import-backup">Import backup<input aria-label="Import Planorama backup" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importBackup(file); event.currentTarget.value = ""; }} /></label></div>
-            </div>
-            <div className="project-manager">
-              <div className="label-manager-heading"><strong>Projects</strong><button type="button" className="task-action" onClick={addProject}>+ Add project</button></div>
-              {projects.length > 0 ? <div className="project-chip-list">{projects.map((project) => <span className="project-chip" key={project.id}>{project.name}<button type="button" aria-label={`Delete ${project.name} project`} onClick={() => void deleteProject(project.id)}>×</button></span>)}</div> : <p className="project-empty">Group related tasks into a project, like Website or Study Plan.</p>}
-            </div>
-            <div className="template-tools">
-              <label>Task templates
-                <select aria-label="Use a saved task template" value={selectedTemplateId} onChange={(event) => applyTemplate(event.target.value)}>
-                  <option value="">Start from scratch…</option>
-                  {taskTemplates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
-                </select>
-              </label>
-              {selectedTemplateId && <button type="button" className="task-action delete-template" onClick={() => deleteTemplate(selectedTemplateId)}>Delete template</button>}
-            </div>
-            <form className="quick-add" onSubmit={(event) => { event.preventDefault(); void addTask(); }}>
-              <input aria-label="New task" placeholder="Add something to your list…" maxLength={240} value={newTask} onChange={(event) => setNewTask(event.target.value)} />
-              <button aria-label="Add task" type="submit"><Plus size={20} weight="bold" /></button>
-              <div className="quick-add-options">
-                <fieldset className="label-picker">
-                  <legend>Labels (optional)</legend>
-                  {labels.map((label) => (
-                    <label key={label.id}>
-                      <input type="checkbox" checked={selectedLabelIds.includes(label.id)} onChange={() => toggleLabel(label.id)} />
-                      {label.name}
-                    </label>
-                  ))}
-                </fieldset>
-                <label>Project (optional)
-                  <select aria-label="Assign task to project" value={newProjectId} onChange={(event) => setNewProjectId(event.target.value)}>
-                    <option value="">No project</option>
-                    {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
-                  </select>
-                </label>
-                <label className="notes-field">Notes (optional)
-                  <textarea aria-label="New task notes" placeholder="Add details or a reminder…" maxLength={2000} value={newNotes} onChange={(event) => setNewNotes(event.target.value)} />
-                </label>
-                <label>Due date <input aria-label="Task due date" type="date" value={newDueDate} onChange={(event) => setNewDueDate(event.target.value)} /></label>
-                <label>Due time (optional) <input aria-label="Task due time" type="time" value={newDueTime} onChange={(event) => setNewDueTime(event.target.value)} /></label>
-                <label>Repeat
-                  <select aria-label="Task repeat" value={newRecurrence} onChange={(event) => setNewRecurrence(event.target.value as PlannerTask["recurrence"])}>
-                    <option value="none">Does not repeat</option>
-                    <option value="daily">Daily</option>
-                    <option value="weekly">Weekly</option>
-                    <option value="monthly">Monthly</option>
-                    <option value="yearly">Yearly</option>
-                  </select>
-                </label>
-                <TaskPriorityOrgControl
-                  priority={newPriority}
-                  isPinned={newIsPinned}
-                  isPersonal={newIsPersonal}
-                  timingPreference={newTimingPreference}
-                  preferences={preferences}
-                  onSelectPriority={setNewPriority}
-                  onTogglePinned={() => setNewIsPinned((p) => !p)}
-                  onTogglePersonal={() => setNewIsPersonal((c) => !c)}
-                  onToggleTimingPreference={() => setNewTimingPreference((t) => (t === "whenever" ? "scheduled" : "whenever"))}
-                />
-              </div>
-            </form>
-            {saveError && <p className="save-error" role="status">{saveError}</p>}
-            <div className="task-tools">
-              {connectedCalendars.length > 0 && (
-                <label className="task-calendar-filter">Calendar
-                  <select aria-label="Filter by calendar" value={calendarFilter} onChange={(event) => setCalendarFilter(event.target.value)}>
-                    <option value="">All calendars</option>
-                    <option value="__local">Planorama only</option>
-                    {connectedCalendars.map((cal) => (
-                      <option key={cal.id} value={cal.id}>
-                        {cal.accountEmail ? `${cal.name} (${cal.accountEmail})` : cal.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              <label className="task-label-filter">Label
-                <select aria-label="Filter by label" value={labelFilter} onChange={(event) => setLabelFilter(event.target.value)}>
-                  <option value="">All labels</option>
-                  {labels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}
-                </select>
-              </label>
-              <label className="task-project-filter">Project
-                <select aria-label="Filter by project" value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}>
-                  <option value="">All projects</option>
-                  <option value="__unassigned">No project</option>
-                  {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
-                </select>
-              </label>
-              <label className="task-search">
-                <span className="sr-only">Search tasks</span>
-                <input type="search" placeholder="Search your tasks…" value={taskSearch} onChange={(event) => setTaskSearch(event.target.value)} aria-label="Search tasks" />
-                <span aria-hidden="true">⌕</span>
-              </label>
-              <label className="task-sort">Sort by
-                <select aria-label="Sort tasks" value={taskSort} onChange={(event) => setTaskSort(event.target.value as typeof taskSort)}>
-                  <option value="due">Due date</option>
-                  <option value="priority">Priority</option>
-                  <option value="newest">Newest</option>
-                </select>
-              </label>
-            </div>
-            <div className="task-filter-bar" aria-label="Filter tasks">
-              {(["all", "open", "completed"] as const).map((filter) => (
-                <button type="button" key={filter} className={taskFilter === filter ? "active" : ""} onClick={() => setTaskFilter(filter)}>
-                  {filter === "all" ? "All" : filter === "open" ? "To do" : "Done"}
-                </button>
-              ))}
-              {selectedDate && <span className="selected-date-label">{new Date(selectedDate + "T12:00:00").toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" })}</span>}
-            </div>
-            <div className="task-list">
-              {visibleTasks.map((task) => editingId === task.id && !detailTaskId ? (
-                <form className="task-edit-form" key={task.id} onSubmit={(event) => { event.preventDefault(); void saveEdit(task); }}>
-                  <label>Task title<input autoFocus maxLength={240} value={editTitle} onChange={(event) => setEditTitle(event.target.value)} /></label>
-                  <label>Notes (optional)<textarea maxLength={2000} value={editNotes} onChange={(event) => setEditNotes(event.target.value)} placeholder="Add details or a reminder…" /></label>
-                  <fieldset className="label-picker edit-label-picker">
-                    <legend>Labels</legend>
-                    {labels.map((label) => (
-                      <label key={label.id}>
-                        <input type="checkbox" checked={editLabelIds.includes(label.id)} onChange={() => toggleLabel(label.id, true)} />
-                        {label.name}
-                      </label>
-                    ))}
-                  </fieldset>
-                  <label className="task-project-edit">Project
-                    <select aria-label="Edit task project" value={editProjectId} onChange={(event) => setEditProjectId(event.target.value)}>
-                      <option value="">No project</option>
-                      {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
-                    </select>
-                  </label>
-                  <div className="task-edit-fields">
-                    <label>Due date<input type="date" value={editDueDate} onChange={(event) => setEditDueDate(event.target.value)} /></label>
-                    <label>Due time<input type="time" value={editDueTime} onChange={(event) => setEditDueTime(event.target.value)} /></label>
-                    <label>Location (optional)<input maxLength={200} value={editLocation} onChange={(event) => setEditLocation(event.target.value)} placeholder="Physical address, room, or meeting link" /></label>
-                    <label>Repeat
-                      <select value={editRecurrence} onChange={(event) => setEditRecurrence(event.target.value as PlannerTask["recurrence"])}>
-                        <option value="none">Does not repeat</option>
-                        <option value="daily">Daily</option>
-                        <option value="weekly">Weekly</option>
-                        <option value="monthly">Monthly</option>
-                        <option value="yearly">Yearly</option>
-                      </select>
-                    </label>
-                    <label>Status
-                      <select value={editStatus} onChange={(event) => setEditStatus(event.target.value as PlannerTask["status"])}>
-                        <option value="open">To Do</option>
-                        <option value="in_progress">In Progress</option>
-                        <option value="completed">Done</option>
-                      </select>
-                    </label>
-                  </div>
-                  <TaskPriorityOrgControl
-                    priority={editPriority}
-                    isPinned={editIsPinned}
-                    isPersonal={editIsPersonal}
-                    timingPreference={editTimingPreference}
-                    preferences={preferences}
-                    onSelectPriority={setEditPriority}
-                    onTogglePinned={() => setEditIsPinned((p) => !p)}
-                    onTogglePersonal={() => setEditIsPersonal((c) => !c)}
-                    onToggleTimingPreference={() => setEditTimingPreference((t) => (t === "whenever" ? "scheduled" : "whenever"))}
-                  />
-                  <div className="task-edit-actions">
-                    <button type="submit" className="task-action save">Save changes</button>
-                    <button type="button" className="task-action" onClick={() => setEditingId(null)}>Cancel</button>
-                  </div>
-                </form>
-              ) : (
-                <div className={"task-row " + (task.status === "completed" ? "is-done" : "") + (task.isPinned ? " is-pinned" : "")} key={task.id}>
-                  <button className="task-toggle" aria-label={task.status === "completed" ? `Mark ${task.title} as open` : `Complete ${task.title}`} onClick={() => void toggleTask(task)}>
-                    <span className={"task-check " + (task.status === "completed" ? "checked" : "")}>
-                      {task.status === "completed" && <CheckCircle size={18} weight="fill" />}
-                    </span>
-                  </button>
-                  <span className="task-title" role="button" tabIndex={0} onClick={() => openTaskDetail(task)} onKeyDown={(e) => { if (e.key === "Enter") openTaskDetail(task); }}>
-                    <span className="task-title-main">
-                      {task.isPinned && <span className="task-row-pin" title="Pinned: Keep this task easy to find">📌</span>}
-                      {task.title}
-                    </span>
-                    {task.projectId && <span className="task-project-chip">{projects.find((project) => project.id === task.projectId)?.name ?? "Project"}</span>}
-                    {task.isGoogleEvent && (
-                      <span
-                        className="task-calendar-source-chip"
-                        style={{
-                          backgroundColor: `${task.googleCalendarColor || "#4285F4"}20`,
-                          borderColor: task.googleCalendarColor || "#4285F4",
-                          color: task.googleCalendarColor || "#1a73e8",
-                        }}
-                        title={`Google Calendar: ${task.googleCalendarName || "Event"}${task.isReadOnlyCalendar ? " (Read-only)" : ""}`}
-                      >
-                        📅 {task.googleCalendarName || "Google"}
-                        {task.isReadOnlyCalendar && " 🔒"}
-                      </span>
-                    )}
-                    {task.syncStatus === "pending" && (
-                      <span className="badge-chip" style={{ background: "#fef3c7", color: "#b45309", fontSize: "10.5px" }} title="Pending sync with Google Calendar">
-                        ⏳ Syncing
-                      </span>
-                    )}
-                    {task.syncStatus === "conflict" && (
-                      <span className="badge-chip" style={{ background: "#fee2e2", color: "#b91c1c", fontSize: "10.5px" }} title="Conflict detected with Google Calendar">
-                        ⚠️ Conflict
-                      </span>
-                    )}
-                    {task.labelIds?.length > 0 && <span className="task-labels">{task.labelIds.map((id) => <small className="task-label-chip" key={id}>{labels.find((label) => label.id === id)?.name ?? id}</small>)}</span>}
-                    <div className="task-row-tags">
-                      {task.isPersonal && <span className="badge-chip badge-personal" title="Personal: Optional category for life tasks">🌿 Personal</span>}
-                      {task.timingPreference === "whenever" && <span className="badge-chip badge-whenever" title="Whenever: No specific deadline">🟢 Whenever</span>}
-                    </div>
-                    {task.location && (
-                      <small style={{ color: "#475569", display: "inline-flex", alignItems: "center", gap: "3px" }}>
-                        📍 {task.location}
-                      </small>
-                    )}
-                    {task.notes && <small className="task-notes-preview">{task.notes}</small>}
-                    {task.dueDate && <small className={"task-due-date " + (isOverdue(task) ? "overdue" : "")}>{isOverdue(task) ? "Overdue · " : ""}{new Date(task.dueDate + "T12:00:00").toLocaleDateString("en", { month: "short", day: "numeric" })}{task.dueTime ? ` · ${new Date(`2000-01-01T${task.dueTime}`).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}` : ""}</small>}
-                  </span>
-                  <span className={"priority-badge priority-" + task.priority}>{priorityEmoji(task.priority)} {priorityLabel(task.priority)}</span>
-                  <div className="task-row-actions">
-                    <button type="button" className="task-action" aria-label={`Save ${task.title} as template`} onClick={() => saveAsTemplate(task)}>Template</button>
-                    <button type="button" className="task-action" aria-label={`Edit ${task.title}`} onClick={() => beginEdit(task)}>Edit</button>
-                    <button type="button" className="task-action delete" aria-label={`Delete ${task.title}`} onClick={() => void deleteTask(task)}>Delete</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-            {loaded && tasks.length === 0 && <p className="empty-tasks">Your list is a blank page. Add a little win to get started.</p>}{loaded && tasks.length > 0 && visibleTasks.length === 0 && <p className="empty-tasks">{selectedDate ? "No tasks are due on this date." : "No tasks match this filter."}</p>}
-            <div className="gentle-reminder"><span>✳</span><p>Small steps count. You don&apos;t have to do it all today.</p></div>
-          </section>
-        </div>
+          )}
+        </CalendarWorkspaceShell>
         )}
       </div>
 
-      {/* ===== STANDARDIZED ADD TASK MODAL ===== */}
-      <AddTaskModal
+      {/* ===== UNIFIED CREATION MODAL (Event, Task & Appointment Schedule) ===== */}
+      <UnifiedCreateModal
         isOpen={addTaskOpen}
         onClose={closeAddTask}
-        initialDueDate={addTaskDueDate}
-        initialDueTime={addTaskDueTime}
-        initialStatus={addTaskStatus}
+        initialMode={createModalMode}
+        initialDate={addTaskDueDate}
+        initialTime={addTaskDueTime}
         preferences={preferences}
         labels={labels}
         onAddLabel={addLabel}
-        onSaveTask={handleSaveNewTask}
         writableCalendars={writableCalendars}
+        existingTasks={tasks}
+        onSaveEvent={handleSaveNewEvent}
+        onSaveTask={handleSaveNewTask}
+        onSaveAppointmentSchedule={handleSaveNewAppointment}
       />
 
-      {/* ===== TASK DETAIL MODAL ===== */}
-      {detailTask && detailTaskId && (
-        <div className="modal-overlay" onClick={() => { setDetailTaskId(null); setEditingId(null); }} onKeyDown={(e) => { if (e.key === "Escape") { setDetailTaskId(null); setEditingId(null); } }}>
-          <div className="modal-card detail-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Task details">
-            <div className="modal-header">
-              <h3>Task Details</h3>
-              <button className="modal-close" onClick={() => { setDetailTaskId(null); setEditingId(null); }} aria-label="Close"><X size={20} /></button>
-            </div>
-            <form onSubmit={(e) => { e.preventDefault(); void saveEdit(detailTask); }} className="detail-form">
-              {detailTask.isGoogleEvent && (
-                <div
-                  className="google-event-detail-banner"
-                  style={{
-                    borderLeft: `4px solid ${detailTask.googleCalendarColor || "#4285F4"}`,
-                    background: "#f8fafc",
-                    padding: "10px 14px",
-                    borderRadius: "6px",
-                    marginBottom: "14px",
-                    border: "1px solid #cbd5e1",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "6px",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "5px",
-                        fontWeight: 700,
-                        fontSize: "12px",
-                        padding: "3px 8px",
-                        borderRadius: "4px",
-                        backgroundColor: `${detailTask.googleCalendarColor || "#4285F4"}22`,
-                        color: detailTask.googleCalendarColor || "#1a73e8",
-                      }}
-                    >
-                      📅 {detailTask.googleCalendarName || "Google Calendar"}
-                      {detailTask.isReadOnlyCalendar && " 🔒 (Read-only Client Calendar)"}
-                    </span>
-                    {detailTask.googleHtmlLink && (
-                      <a
-                        href={detailTask.googleHtmlLink}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ fontSize: "11.5px", color: "#2563eb", textDecoration: "underline", fontWeight: 600 }}
+      {/* ===== TASK / EVENT DETAIL MODAL ===== */}
+      {detailTask && detailTaskId && (() => {
+        const itemType = getItemType(detailTask);
+        const tileStyle = getItemTileStyle(detailTask, preferences.itemStyles, activeCalendarConfigs);
+        const itemColor = tileStyle.primaryColor;
+        const isEvent = itemType === "event" || Boolean(detailTask.isGoogleEvent || detailTask.durationMinutes || detailTask.isAllDay);
+        const isAppt = itemType === "appointment";
+        return (
+          <div className="modal-overlay" onClick={() => { setDetailTaskId(null); setEditingId(null); }} onKeyDown={(e) => { if (e.key === "Escape") { setDetailTaskId(null); setEditingId(null); } }}>
+            <div className="modal-card detail-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={isAppt ? "Appointment schedule details" : isEvent ? "Event details" : "Task details"}>
+              <div className="modal-header">
+                <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                  <h3 style={{ margin: 0 }}>{isAppt ? "Appointment Details" : isEvent ? "Event Details" : "Task Details"}</h3>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "4px",
+                      fontSize: "11px",
+                      fontWeight: 700,
+                      padding: "2px 8px",
+                      borderRadius: "12px",
+                      backgroundColor: `${itemColor}20`,
+                      color: tileStyle.indicatorColor,
+                      border: `1.5px solid ${tileStyle.borderColor}`,
+                    }}
+                  >
+                    {isAppt ? "⏱️ Appointment Schedule" : isEvent ? "📅 Event" : "☑️ Task"}
+                  </span>
+                </div>
+                <button className="modal-close" onClick={() => { setDetailTaskId(null); setEditingId(null); }} aria-label="Close"><X size={20} /></button>
+              </div>
+              <form onSubmit={(e) => { e.preventDefault(); void saveEdit(detailTask); }} className="detail-form">
+                {detailTask.isGoogleEvent && (
+                  <div
+                    className="google-event-detail-banner"
+                    style={{
+                      borderLeft: `4px solid ${detailTask.googleCalendarColor || "#4285F4"}`,
+                      background: "#f8fafc",
+                      padding: "10px 14px",
+                      borderRadius: "6px",
+                      marginBottom: "14px",
+                      border: "1px solid #cbd5e1",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "6px",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "5px",
+                          fontWeight: 700,
+                          fontSize: "12px",
+                          padding: "3px 8px",
+                          borderRadius: "4px",
+                          backgroundColor: `${detailTask.googleCalendarColor || "#4285F4"}22`,
+                          color: detailTask.googleCalendarColor || "#1a73e8",
+                        }}
                       >
-                        Open in Google Calendar ↗
-                      </a>
+                        📅 {detailTask.googleCalendarName || "Google Calendar"}
+                        {detailTask.isReadOnlyCalendar && " 🔒 (Read-only Client Calendar)"}
+                      </span>
+                      {detailTask.googleHtmlLink && (
+                        <a
+                          href={detailTask.googleHtmlLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ fontSize: "11.5px", color: "#2563eb", textDecoration: "underline", fontWeight: 600 }}
+                        >
+                          Open in Google Calendar ↗
+                        </a>
+                      )}
+                    </div>
+                    {detailTask.googleAccountEmail && (
+                      <div style={{ fontSize: "11.5px", color: "#475569" }}>
+                        <strong>Account:</strong> {detailTask.googleAccountEmail}
+                      </div>
+                    )}
+                    {detailTask.location && (
+                      <div style={{ fontSize: "11.5px", color: "#475569", display: "flex", alignItems: "center", gap: "4px" }}>
+                        <span>📍</span> {detailTask.location}
+                      </div>
+                    )}
+                    {detailTask.attendees && detailTask.attendees.length > 0 && (
+                      <div style={{ fontSize: "11.5px", color: "#475569" }}>
+                        <strong>Attendees:</strong> {detailTask.attendees.map((a) => a.displayName || a.email).join(", ")}
+                      </div>
+                    )}
+                    {detailTask.isReadOnlyCalendar && (
+                      <p style={{ margin: "4px 0 0", fontSize: "11.5px", color: "#64748b", lineHeight: 1.4 }}>
+                        This client calendar was shared with view-only permissions. Edits saved here update your Planorama view, but will not overwrite your client&apos;s Google Calendar.
+                      </p>
                     )}
                   </div>
-                  {detailTask.googleAccountEmail && (
-                    <div style={{ fontSize: "11.5px", color: "#475569" }}>
-                      <strong>Account:</strong> {detailTask.googleAccountEmail}
-                    </div>
+                )}
+                <label className="detail-label">Title
+                  <input autoFocus maxLength={240} value={editTitle} onChange={(e) => setEditTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { setDetailTaskId(null); setEditingId(null); } }} />
+                </label>
+                <label className="detail-label">{isEvent ? "Description" : "Notes"}
+                  <textarea maxLength={2000} rows={3} value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder={isEvent ? "Meeting agenda, notes or documents…" : "Add details or a reminder…"} />
+                </label>
+                <label className="detail-label">Location
+                  <input maxLength={200} value={editLocation} onChange={(e) => setEditLocation(e.target.value)} placeholder="Physical address, room, or meeting link" />
+                </label>
+                <div className="detail-grid">
+                  <label className="detail-label">{isEvent ? "Event Date" : "Due date"} <input type="date" value={editDueDate} onChange={(e) => setEditDueDate(e.target.value)} /></label>
+                  <label className="detail-label">{isEvent ? "Start time" : "Scheduled time (optional)"} <input type="time" value={editDueTime} onChange={(e) => setEditDueTime(e.target.value)} /></label>
+                  {!isEvent && (
+                    <label className="detail-label">Status
+                      <select value={editStatus} onChange={(e) => setEditStatus(e.target.value as PlannerTask["status"])}>
+                        <option value="open">To Do</option><option value="in_progress">In Progress</option><option value="completed">Done</option>
+                      </select>
+                    </label>
                   )}
-                  {detailTask.location && (
-                    <div style={{ fontSize: "11.5px", color: "#475569", display: "flex", alignItems: "center", gap: "4px" }}>
-                      <span>📍</span> {detailTask.location}
-                    </div>
-                  )}
-                  {detailTask.attendees && detailTask.attendees.length > 0 && (
-                    <div style={{ fontSize: "11.5px", color: "#475569" }}>
-                      <strong>Attendees:</strong> {detailTask.attendees.map((a) => a.displayName || a.email).join(", ")}
-                    </div>
-                  )}
-                  {detailTask.isReadOnlyCalendar && (
-                    <p style={{ margin: "4px 0 0", fontSize: "11.5px", color: "#64748b", lineHeight: 1.4 }}>
-                      This client calendar was shared with view-only permissions. Edits saved here update your Planorama view, but will not overwrite your client&apos;s Google Calendar.
-                    </p>
+                  <label className="detail-label">Repeat
+                    <select value={editRecurrence} onChange={(e) => setEditRecurrence(e.target.value as PlannerTask["recurrence"])}>
+                      <option value="none">Does not repeat</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option>
+                    </select>
+                  </label>
+                  {!isEvent && (
+                    <label className="detail-label">Project
+                      <select value={editProjectId} onChange={(e) => setEditProjectId(e.target.value)}>
+                        <option value="">No project</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                    </label>
                   )}
                 </div>
-              )}
-              <label className="detail-label">Title
-                <input autoFocus maxLength={240} value={editTitle} onChange={(e) => setEditTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { setDetailTaskId(null); setEditingId(null); } }} />
-              </label>
-              <label className="detail-label">Notes
-                <textarea maxLength={2000} rows={3} value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="Add details or a reminder…" />
-              </label>
-              <label className="detail-label">Location
-                <input maxLength={200} value={editLocation} onChange={(e) => setEditLocation(e.target.value)} placeholder="Physical address, room, or meeting link" />
-              </label>
-              <div className="detail-grid">
-                <label className="detail-label">Due date <input type="date" value={editDueDate} onChange={(e) => setEditDueDate(e.target.value)} /></label>
-                <label className="detail-label">Start time <input type="time" value={editDueTime} onChange={(e) => setEditDueTime(e.target.value)} /></label>
-                <label className="detail-label">Status
-                  <select value={editStatus} onChange={(e) => setEditStatus(e.target.value as PlannerTask["status"])}>
-                    <option value="open">To Do</option><option value="in_progress">In Progress</option><option value="completed">Done</option>
-                  </select>
-                </label>
-                <label className="detail-label">Repeat
-                  <select value={editRecurrence} onChange={(e) => setEditRecurrence(e.target.value as PlannerTask["recurrence"])}>
-                    <option value="none">Does not repeat</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option>
-                  </select>
-                </label>
-                <label className="detail-label">Project
-                  <select value={editProjectId} onChange={(e) => setEditProjectId(e.target.value)}>
-                    <option value="">No project</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
-                </label>
-              </div>
-              <TaskPriorityOrgControl
-                priority={editPriority}
-                isPinned={editIsPinned}
-                isPersonal={editIsPersonal}
-                timingPreference={editTimingPreference}
-                preferences={preferences}
-                onSelectPriority={setEditPriority}
-                onTogglePinned={() => setEditIsPinned((p) => !p)}
-                onTogglePersonal={() => setEditIsPersonal((c) => !c)}
-                onToggleTimingPreference={() => setEditTimingPreference((t) => (t === "whenever" ? "scheduled" : "whenever"))}
-              />
-              <fieldset className="label-picker detail-labels"><legend>Labels</legend>{labels.map((label) => <label key={label.id}><input type="checkbox" checked={editLabelIds.includes(label.id)} onChange={() => toggleLabel(label.id, true)} />{label.name}</label>)}</fieldset>
-              {saveError && <p className="save-error" role="status">{saveError}</p>}
-              <div className="detail-actions">
-                <button type="submit" className="task-action save">Save changes</button>
-                <button type="button" className="task-action delete" onClick={() => void deleteTask(detailTask)}>Delete</button>
-                <button type="button" className="task-action" onClick={() => { setDetailTaskId(null); setEditingId(null); }}>Cancel</button>
-              </div>
-            </form>
+                {!isEvent && (
+                  <>
+                    <TaskPriorityOrgControl
+                      priority={editPriority}
+                      isPinned={editIsPinned}
+                      isPersonal={editIsPersonal}
+                      timingPreference={editTimingPreference}
+                      preferences={preferences}
+                      onSelectPriority={setEditPriority}
+                      onTogglePinned={() => setEditIsPinned((p) => !p)}
+                      onTogglePersonal={() => setEditIsPersonal((c) => !c)}
+                      onToggleTimingPreference={() => setEditTimingPreference((t) => (t === "whenever" ? "scheduled" : "whenever"))}
+                    />
+                    <fieldset className="label-picker detail-labels"><legend>Labels</legend>{labels.map((label) => <label key={label.id}><input type="checkbox" checked={editLabelIds.includes(label.id)} onChange={() => toggleLabel(label.id, true)} />{label.name}</label>)}</fieldset>
+                  </>
+                )}
+                {saveError && <p className="save-error" role="status">{saveError}</p>}
+                <div className="detail-actions">
+                  <button type="submit" className="task-action save">Save changes</button>
+                  <button type="button" className="task-action delete" onClick={() => void deleteTask(detailTask)}>Delete</button>
+                  <button type="button" className="task-action" onClick={() => { setDetailTaskId(null); setEditingId(null); }}>Cancel</button>
+                </div>
+              </form>
+            </div>
           </div>
-        </div>
-      )}
-
-      {/* ===== PREFERENCES MODAL ===== */}
-      <PreferencesModal
-        isOpen={preferencesModalOpen}
-        onClose={() => setPreferencesModalOpen(false)}
-        preferences={preferences}
-        onSavePreferences={savePreferences}
-        labels={labels}
-        onAddLabel={addLabel}
-        onDeleteLabel={deleteLabel}
-        onRestoreDefaults={handleRestoreDefaultPreferences}
-        onSyncGoogle={handleSyncGoogle}
-        isSyncingGoogle={isSyncingGoogle}
-        showToast={showToast}
-        onError={(err) => setSaveError(err)}
-      />
+        );
+      })()}
 
       {/* ===== TOAST ===== */}
       {toast && <div className="toast" role="status">{toast}</div>}

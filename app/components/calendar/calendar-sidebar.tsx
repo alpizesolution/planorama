@@ -14,22 +14,27 @@ import {
   ArrowClockwise,
   X,
 } from "@phosphor-icons/react";
+import { ChevronLeft, ChevronRight, CalendarClock, CheckSquare, CalendarPlus } from "lucide-react";
 import type { PlannerTask } from "@/lib/schedule/types";
 import type {
   GoogleCalendarConfig,
   GoogleIntegrationStatus,
 } from "@/lib/google-calendar/types";
+import { type ItemColorPreferences, DEFAULT_ITEM_COLORS, type ItemStylesPreferences, DEFAULT_ITEM_STYLES } from "@/lib/calendar/item-color";
 
-interface CalendarSidebarProps {
+export interface CalendarSidebarProps {
   currentShownDate: Date;
   selectedDate: string | null;
   onSelectDate: (dateKey: string | null) => void;
   onNavigateMonth: (offset: number) => void;
   weekStartsOn: 0 | 1 | 6;
   tasks: PlannerTask[];
+  itemColors?: ItemColorPreferences;
+  itemStyles?: ItemStylesPreferences;
 
   onAddEvent: (dateKey?: string) => void;
   onAddTask: (dateKey?: string) => void;
+  onAddAppointmentSchedule?: (dateKey?: string) => void;
 
   localCalendarEnabled: boolean;
   onToggleLocalCalendar: () => void;
@@ -42,6 +47,9 @@ interface CalendarSidebarProps {
 
   isOpenOnMobile?: boolean;
   onCloseMobile?: () => void;
+
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 export function CalendarSidebar({
@@ -51,8 +59,11 @@ export function CalendarSidebar({
   onNavigateMonth,
   weekStartsOn,
   tasks,
+  itemColors = DEFAULT_ITEM_COLORS,
+  itemStyles = DEFAULT_ITEM_STYLES,
   onAddEvent,
   onAddTask,
+  onAddAppointmentSchedule,
   localCalendarEnabled,
   onToggleLocalCalendar,
   googleStatus,
@@ -63,6 +74,8 @@ export function CalendarSidebar({
   isSyncingGoogle,
   isOpenOnMobile = false,
   onCloseMobile,
+  isCollapsed = false,
+  onToggleCollapse,
 }: CalendarSidebarProps) {
   // Create Dropdown state
   const [createDropdownOpen, setCreateDropdownOpen] = useState(false);
@@ -79,17 +92,26 @@ export function CalendarSidebar({
   // Search filter query
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Close create dropdown on outside click
+  // Close create dropdown on outside click or Escape key
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setCreateDropdownOpen(false);
       }
     }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setCreateDropdownOpen(false);
+      }
+    }
     if (createDropdownOpen) {
       document.addEventListener("mousedown", handleClickOutside);
+      document.addEventListener("keydown", handleKeyDown);
     }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
   }, [createDropdownOpen]);
 
   // Synchronize mini-calendar with main calendar when main calendar month changes
@@ -197,7 +219,7 @@ export function CalendarSidebar({
   }, [allCalendars, googleStatus, searchQuery]);
 
   return (
-    <>
+    <div className={`calendar-sidebar-rail ${isCollapsed ? "is-collapsed" : "is-expanded"}`}>
       {/* Mobile Drawer Backdrop */}
       {isOpenOnMobile && (
         <div
@@ -242,36 +264,71 @@ export function CalendarSidebar({
           </button>
 
           {createDropdownOpen && (
-            <div className="sidebar-create-dropdown" role="menu">
+            <div className="sidebar-create-dropdown" role="menu" aria-label="Create options">
               <button
                 type="button"
-                className="create-dropdown-item"
+                className="create-dropdown-item item-event"
                 role="menuitem"
+                id="create-dropdown-event-option"
                 onClick={() => {
                   setCreateDropdownOpen(false);
                   onAddEvent(selectedDate || undefined);
                 }}
               >
-                <span className="item-icon event-icon">📅</span>
-                <div className="item-details">
-                  <strong>Event</strong>
-                  <small>Timed meeting or calendar event</small>
+                <div className="create-dropdown-item-content">
+                  <span className="item-icon event-icon" aria-hidden="true">
+                    <CalendarClock size={17} strokeWidth={2.2} />
+                  </span>
+                  <div className="item-details">
+                    <strong className="item-title">Create an event</strong>
+                    <small className="item-desc">Meetings, appointments, or anything happening at a specific time.</small>
+                  </div>
                 </div>
+                <ChevronRight size={15} strokeWidth={2.2} className="item-chevron" aria-hidden="true" />
               </button>
+
               <button
                 type="button"
-                className="create-dropdown-item"
+                className="create-dropdown-item item-task"
                 role="menuitem"
+                id="create-dropdown-task-option"
                 onClick={() => {
                   setCreateDropdownOpen(false);
                   onAddTask(selectedDate || undefined);
                 }}
               >
-                <span className="item-icon task-icon">✓</span>
-                <div className="item-details">
-                  <strong>Task</strong>
-                  <small>Planner to-do item with priority</small>
+                <div className="create-dropdown-item-content">
+                  <span className="item-icon task-icon" aria-hidden="true">
+                    <CheckSquare size={17} strokeWidth={2.2} />
+                  </span>
+                  <div className="item-details">
+                    <strong className="item-title">Create a task</strong>
+                    <small className="item-desc">To-dos and work you need to complete.</small>
+                  </div>
                 </div>
+                <ChevronRight size={15} strokeWidth={2.2} className="item-chevron" aria-hidden="true" />
+              </button>
+
+              <button
+                type="button"
+                className="create-dropdown-item item-appointment"
+                role="menuitem"
+                id="create-dropdown-appointment-option"
+                onClick={() => {
+                  setCreateDropdownOpen(false);
+                  onAddAppointmentSchedule?.(selectedDate || undefined);
+                }}
+              >
+                <div className="create-dropdown-item-content">
+                  <span className="item-icon appointment-icon" aria-hidden="true">
+                    <CalendarPlus size={17} strokeWidth={2.2} />
+                  </span>
+                  <div className="item-details">
+                    <strong className="item-title">Appointment schedule</strong>
+                    <small className="item-desc">Set up bookable availability and meeting slots.</small>
+                  </div>
+                </div>
+                <ChevronRight size={15} strokeWidth={2.2} className="item-chevron" aria-hidden="true" />
               </button>
             </div>
           )}
@@ -407,7 +464,7 @@ export function CalendarSidebar({
                     onChange={onToggleLocalCalendar}
                     className="calendar-checkbox"
                   />
-                  <span className="calendar-color-swatch" style={{ backgroundColor: "#ff3d8b" }} />
+                  <span className="calendar-color-swatch" style={{ backgroundColor: itemStyles?.event?.primaryColor || itemColors.eventColor }} />
                   <span className="calendar-item-name">Personal Planner</span>
                   <span className="calendar-badge badge-local">Local</span>
                 </label>
@@ -606,6 +663,25 @@ export function CalendarSidebar({
           )}
         </div>
       </aside>
-    </>
+
+      {/* Desktop/Tablet Edge Collapse / Expand Arrow Button */}
+      {onToggleCollapse && (
+        <button
+          type="button"
+          className={`sidebar-edge-toggle-btn ${isCollapsed ? "is-collapsed" : "is-expanded"}`}
+          onClick={onToggleCollapse}
+          aria-label={isCollapsed ? "Expand calendar sidebar" : "Collapse calendar sidebar"}
+          aria-expanded={!isCollapsed}
+          title={isCollapsed ? "Expand calendar sidebar" : "Collapse calendar sidebar"}
+          id="sidebar-edge-toggle-btn"
+        >
+          {isCollapsed ? (
+            <ChevronRight size={16} strokeWidth={2.5} />
+          ) : (
+            <ChevronLeft size={16} strokeWidth={2.5} />
+          )}
+        </button>
+      )}
+    </div>
   );
 }

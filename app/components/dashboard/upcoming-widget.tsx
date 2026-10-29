@@ -10,12 +10,24 @@ import {
   CheckCircle,
 } from "@phosphor-icons/react";
 import type { PlannerTask } from "@/lib/schedule/types";
+import type { GoogleCalendarConfig } from "@/lib/google-calendar/types";
 import { getUpcomingDateGroups } from "@/lib/dashboard/dashboard-utils";
+import {
+  getItemType,
+  type ItemColorPreferences,
+  DEFAULT_ITEM_COLORS,
+  getItemTileStyle,
+  DEFAULT_ITEM_STYLES,
+  type ItemStylesPreferences,
+} from "@/lib/calendar/item-color";
 
 interface UpcomingWidgetProps {
   tasks: PlannerTask[];
   todayKey: string;
   labels: { id: string; name: string }[];
+  itemColors?: ItemColorPreferences;
+  itemStyles?: ItemStylesPreferences;
+  allCalendarConfigs?: Record<string, GoogleCalendarConfig>;
   onToggleTask: (task: PlannerTask) => void;
   onEditTask: (task: PlannerTask) => void;
   onQuickAdd: (dateKey: string) => void;
@@ -28,6 +40,9 @@ export function UpcomingWidget({
   tasks,
   todayKey,
   labels,
+  itemColors: _itemColors = DEFAULT_ITEM_COLORS,
+  itemStyles = DEFAULT_ITEM_STYLES,
+  allCalendarConfigs = {},
   onToggleTask,
   onEditTask,
   onQuickAdd,
@@ -107,51 +122,85 @@ export function UpcomingWidget({
               </span>
             </div>
             <div className="upcoming-tasks-list">
-              {overdueTasks.map((task) => (
-                <div
-                  key={task.id}
-                  className={`upcoming-task-row is-overdue ${task.status === "completed" ? "is-done" : ""}`}
-                  onClick={() => onEditTask(task)}
-                >
-                  <button
-                    type="button"
-                    className="upcoming-task-check-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onToggleTask(task);
+              {overdueTasks.map((task) => {
+                const tileStyle = getItemTileStyle(task, itemStyles, allCalendarConfigs);
+                const itemType = getItemType(task);
+                const isAppointment = itemType === "appointment";
+                const itemColor = tileStyle.primaryColor;
+                return (
+                  <div
+                    key={task.id}
+                    className={`upcoming-task-row ${tileStyle.className} is-overdue ${task.status === "completed" ? "is-done" : ""}`}
+                    style={{
+                      ...tileStyle.style,
+                      backgroundColor: task.status === "completed" ? "#fafaf9" : tileStyle.style.backgroundColor,
                     }}
-                    aria-label={`Complete ${task.title}`}
+                    onClick={() => onEditTask(task)}
                   >
-                    <span className={`task-check sm ${task.status === "completed" ? "checked" : ""}`}>
-                      {task.status === "completed" && <CheckCircle size={15} weight="fill" />}
-                    </span>
-                  </button>
-                  <div className="upcoming-task-main">
-                    <span className="upcoming-task-title">{task.title}</span>
-                    <span className="upcoming-task-date-chip is-late">
-                      Due {new Date(task.dueDate + "T12:00:00").toLocaleDateString("en", {
-                        month: "short",
-                        day: "numeric",
-                      })}
-                    </span>
-                    {task.isGoogleEvent && (
-                      <span
-                        className="task-calendar-source-chip"
-                        style={{
-                          backgroundColor: `${task.googleCalendarColor || "#4285F4"}20`,
-                          borderColor: task.googleCalendarColor || "#4285F4",
-                          color: task.googleCalendarColor || "#1a73e8",
-                        }}
-                      >
-                        📅 {task.googleCalendarName || "Google"}
+                    <button
+                      type="button"
+                      className="upcoming-task-check-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleTask(task);
+                      }}
+                      aria-label={`Complete ${task.title}`}
+                    >
+                      <span className={`task-check sm ${task.status === "completed" ? "checked" : ""}`}>
+                        {task.status === "completed" && <CheckCircle size={15} weight="fill" />}
                       </span>
-                    )}
+                    </button>
+                    <div className="upcoming-task-main">
+                      <span className="upcoming-task-title">{task.title}</span>
+                      <span className="upcoming-task-date-chip is-late">
+                        Due {new Date(task.dueDate + "T12:00:00").toLocaleDateString("en", {
+                          month: "short",
+                          day: "numeric",
+                        })}
+                      </span>
+                      {task.isGoogleEvent ? (
+                        <span
+                          className="task-calendar-source-chip"
+                          style={{
+                            backgroundColor: `${task.googleCalendarColor || "#4285F4"}20`,
+                            borderColor: task.googleCalendarColor || "#4285F4",
+                            color: task.googleCalendarColor || "#1a73e8",
+                          }}
+                        >
+                          📅 {task.googleCalendarName || "Google"}
+                        </span>
+                      ) : isAppointment ? (
+                        <span
+                          className="task-calendar-source-chip"
+                          style={{
+                            backgroundColor: `${itemColor}20`,
+                            borderColor: itemColor,
+                            color: "var(--ink)",
+                            fontWeight: 700,
+                          }}
+                        >
+                          ⏱️ Schedule
+                        </span>
+                      ) : itemType === "event" ? (
+                        <span
+                          className="task-calendar-source-chip"
+                          style={{
+                            backgroundColor: `${itemColor}20`,
+                            borderColor: itemColor,
+                            color: "var(--ink)",
+                            fontWeight: 700,
+                          }}
+                        >
+                          📅 Event
+                        </span>
+                      ) : null}
+                    </div>
+                    <span className={`priority-badge-sm priority-${task.priority}`}>
+                      {priorityEmoji(task.priority)} {priorityLabel(task.priority)}
+                    </span>
                   </div>
-                  <span className={`priority-badge-sm priority-${task.priority}`}>
-                    {priorityEmoji(task.priority)} {priorityLabel(task.priority)}
-                  </span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
@@ -202,10 +251,18 @@ export function UpcomingWidget({
                     <div className="upcoming-tasks-list">
                       {group.tasks.map((task) => {
                         const isDone = task.status === "completed";
+                        const tileStyle = getItemTileStyle(task, itemStyles, allCalendarConfigs);
+                        const itemType = getItemType(task);
+                        const isAppointment = itemType === "appointment";
+                        const itemColor = tileStyle.primaryColor;
                         return (
                           <div
                             key={task.id}
-                            className={`upcoming-task-row priority-accent-${task.priority} ${isDone ? "is-done" : ""}`}
+                            className={`upcoming-task-row ${tileStyle.className} priority-accent-${task.priority} ${isDone ? "is-done" : ""}`}
+                            style={{
+                              ...tileStyle.style,
+                              backgroundColor: isDone ? "#fafaf9" : tileStyle.style.backgroundColor,
+                            }}
                             onClick={() => onEditTask(task)}
                           >
                             <button
@@ -239,7 +296,7 @@ export function UpcomingWidget({
                                   })}
                                 </div>
                               )}
-                              {task.isGoogleEvent && (
+                              {task.isGoogleEvent ? (
                                 <span
                                   className="task-calendar-source-chip"
                                   style={{
@@ -250,7 +307,31 @@ export function UpcomingWidget({
                                 >
                                   📅 {task.googleCalendarName || "Google"}
                                 </span>
-                              )}
+                              ) : isAppointment ? (
+                                <span
+                                  className="task-calendar-source-chip"
+                                  style={{
+                                    backgroundColor: `${itemColor}20`,
+                                    borderColor: itemColor,
+                                    color: "var(--ink)",
+                                    fontWeight: 700,
+                                  }}
+                                >
+                                  ⏱️ Schedule
+                                </span>
+                              ) : itemType === "event" ? (
+                                <span
+                                  className="task-calendar-source-chip"
+                                  style={{
+                                    backgroundColor: `${itemColor}20`,
+                                    borderColor: itemColor,
+                                    color: "var(--ink)",
+                                    fontWeight: 700,
+                                  }}
+                                >
+                                  📅 Event
+                                </span>
+                              ) : null}
                             </div>
                             <span className={`priority-badge-sm priority-${task.priority}`}>
                               {priorityEmoji(task.priority)} {priorityLabel(task.priority)}
