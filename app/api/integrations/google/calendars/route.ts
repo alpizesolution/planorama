@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { getVerifiedSessionId } from "@/lib/server/session";
+import { getVerifiedSession } from "@/lib/server/session";
 import { fetchCalendarList, GoogleAuthError } from "@/lib/server/google-calendar";
+import { getAllConnectedAccounts, getSyncMeta, saveSyncMeta } from "@/lib/server/google-token-store";
 import type { GoogleCalendarConfig } from "@/lib/google-calendar/types";
 
 export const dynamic = "force-dynamic";
@@ -20,18 +21,43 @@ const PLANORAMA_ACCENT_COLORS = [
  * GET /api/integrations/google/calendars
  * Fetches user-accessible calendars from Google across all connected accounts
  * (personal, secondary, and shared client calendars).
+ * Strictly enforces user authorization and account ownership on the server.
  */
 export async function GET(request: Request) {
   try {
-    const sessionId = await getVerifiedSessionId();
-    if (!sessionId) {
+    const session = await getVerifiedSession();
+    if (!session) {
       return NextResponse.json({ error: "Session required." }, { status: 401 });
     }
 
     const { searchParams } = new URL(request.url);
-    const accountId = searchParams.get("accountId") || undefined;
+    const requestedAccountId = searchParams.get("accountId")?.trim() || undefined;
 
-    const items = await fetchCalendarList(sessionId, accountId);
+    // Verify requested account belongs to this user
+    if (requestedAccountId) {
+      const userAccounts = await getAllConnectedAccounts(session.userId);
+      const isOwned = userAccounts.some((a) => a.accountId === requestedAccountId);
+      if (!isOwned) {
+        return NextResponse.json(
+          { error: "Account not found or not authorized for this session." },
+          { status: 403 }
+        );
+      }
+    }
+
+    const items = await fetchCalendarList(session.userId, requestedAccountId);
+
+    // Cache verified calendar list for fast server-side authorization during sync
+    try {
+      const meta = await getSyncMeta(session.userId);
+      meta.verifiedCalendars = {
+        items,
+        cachedAt: Date.now(),
+      };
+      await saveSyncMeta(session.userId, meta);
+    } catch {
+      // Non-fatal cache failure
+    }
 
     const calendars: GoogleCalendarConfig[] = items.map((cal, idx) => ({
       id: cal.id,

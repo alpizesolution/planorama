@@ -47,6 +47,11 @@ export type PlannerTask = {
   lastSyncedAt?: string;
   syncStatus?: "synced" | "pending" | "conflict" | "error";
   recurringEventId?: string;
+  durationMinutes?: number;
+  isAllDay?: boolean;
+  itemType?: import("../calendar/item-color").PlannerItemType;
+  color?: string;
+  textColor?: string;
 };
 
 export type NewPlannerTask = Pick<PlannerTask, "title"> & Partial<Omit<PlannerTask, "id" | "title" | "createdAt" | "updatedAt">>;
@@ -61,8 +66,11 @@ export type PlannerPreferences = {
   customLabels: Record<string, string>;
   customEmojis: Record<string, string>;
   calendarTheme?: CalendarThemeSettings;
+  itemColors?: import("../calendar/item-color").ItemColorPreferences;
+  itemStyles?: import("../calendar/item-color").ItemStylesPreferences;
   dashboardWidgets?: DashboardWidgetConfig[];
   googleCalendarSync?: import("../google-calendar/types").GoogleCalendarSyncSettings;
+  sidebarCollapsed?: boolean;
 };
 
 export const DEFAULT_PREFERENCES: PlannerPreferences = {
@@ -75,5 +83,32 @@ export const DEFAULT_PREFERENCES: PlannerPreferences = {
   customLabels: {},
   customEmojis: {},
   calendarTheme: DEFAULT_CALENDAR_THEME,
+  itemColors: {
+    eventColor: "#0284c7",
+    taskColor: "#10b981",
+    scheduleColor: "#f59e0b",
+    eventTextColor: "#ffffff",
+    taskTextColor: "#ffffff",
+    scheduleTextColor: "#ffffff",
+  },
+  itemStyles: {
+    globalStyle: "vibrant_solid",
+    event: {
+      style: "vibrant_solid",
+      color: "#0284c7",
+      textColor: "#ffffff",
+    },
+    task: {
+      style: "vibrant_solid",
+      color: "#10b981",
+      textColor: "#ffffff",
+    },
+    schedule: {
+      style: "vibrant_solid",
+      color: "#f59e0b",
+      textColor: "#ffffff",
+    },
+  },
   dashboardWidgets: DEFAULT_DASHBOARD_WIDGETS,
+  sidebarCollapsed: false,
 };

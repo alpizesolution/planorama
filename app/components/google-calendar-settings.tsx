@@ -129,7 +129,8 @@ export function GoogleCalendarSettings({
 
   function handleConnect() {
     // Initiate OAuth flow with account selection
-    window.location.href = "/api/auth/google";
+    const returnUrl = typeof window !== "undefined" ? window.location.pathname + window.location.search : "/";
+    window.location.href = `/api/auth/google?returnUrl=${encodeURIComponent(returnUrl)}`;
   }
 
   async function handleDisconnectAccount(accountId?: string, email?: string) {

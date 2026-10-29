@@ -3,12 +3,24 @@
 import { useMemo, useState } from "react";
 import { CheckCircle, Plus, Eye, EyeSlash, Trash, PencilSimple } from "@phosphor-icons/react";
 import type { PlannerTask } from "@/lib/schedule/types";
+import type { GoogleCalendarConfig } from "@/lib/google-calendar/types";
 import { sortTodaysFocusTasks } from "@/lib/dashboard/dashboard-utils";
+import {
+  getItemType,
+  type ItemColorPreferences,
+  DEFAULT_ITEM_COLORS,
+  getItemTileStyle,
+  DEFAULT_ITEM_STYLES,
+  type ItemStylesPreferences,
+} from "@/lib/calendar/item-color";
 
 interface TodaysFocusWidgetProps {
   tasks: PlannerTask[];
   todayKey: string;
   labels: { id: string; name: string }[];
+  itemColors?: ItemColorPreferences;
+  itemStyles?: ItemStylesPreferences;
+  allCalendarConfigs?: Record<string, GoogleCalendarConfig>;
   onToggleTask: (task: PlannerTask) => void;
   onEditTask: (task: PlannerTask) => void;
   onDeleteTask: (task: PlannerTask) => void;
@@ -21,6 +33,9 @@ export function TodaysFocusWidget({
   tasks,
   todayKey,
   labels,
+  itemColors: _itemColors = DEFAULT_ITEM_COLORS,
+  itemStyles = DEFAULT_ITEM_STYLES,
+  allCalendarConfigs = {},
   onToggleTask,
   onEditTask,
   onDeleteTask,
@@ -111,10 +126,18 @@ export function TodaysFocusWidget({
         ) : (
           displayedTasks.map((task) => {
             const isDone = task.status === "completed";
+            const tileStyle = getItemTileStyle(task, itemStyles, allCalendarConfigs);
+            const itemType = getItemType(task);
+            const isAppointment = itemType === "appointment";
+            const itemColor = tileStyle.primaryColor;
             return (
               <div
                 key={task.id}
-                className={`dashboard-task-item priority-accent-${task.priority} ${isDone ? "is-done" : ""} ${task.isPinned ? "is-pinned" : ""}`}
+                className={`dashboard-task-item ${tileStyle.className} priority-accent-${task.priority} ${isDone ? "is-done" : ""} ${task.isPinned ? "is-pinned" : ""}`}
+                style={{
+                  ...tileStyle.style,
+                  backgroundColor: isDone ? "#fafaf9" : tileStyle.style.backgroundColor,
+                }}
               >
                 <button
                   type="button"
@@ -147,7 +170,7 @@ export function TodaysFocusWidget({
                   </div>
 
                   <div className="dashboard-task-meta-row">
-                    {task.isGoogleEvent && (
+                    {task.isGoogleEvent ? (
                       <span
                         className="task-calendar-source-chip"
                         style={{
@@ -160,7 +183,31 @@ export function TodaysFocusWidget({
                         📅 {task.googleCalendarName || "Google"}
                         {task.isReadOnlyCalendar && " 🔒"}
                       </span>
-                    )}
+                    ) : isAppointment ? (
+                      <span
+                        className="task-calendar-source-chip"
+                        style={{
+                          backgroundColor: `${itemColor}20`,
+                          borderColor: itemColor,
+                          color: "var(--ink)",
+                          fontWeight: 700,
+                        }}
+                      >
+                        ⏱️ Schedule
+                      </span>
+                    ) : itemType === "event" ? (
+                      <span
+                        className="task-calendar-source-chip"
+                        style={{
+                          backgroundColor: `${itemColor}20`,
+                          borderColor: itemColor,
+                          color: "var(--ink)",
+                          fontWeight: 700,
+                        }}
+                      >
+                        📅 Event
+                      </span>
+                    ) : null}
                     <span className={`priority-badge-sm priority-${task.priority}`}>
                       {priorityEmoji(task.priority)} {priorityLabel(task.priority)}
                     </span>

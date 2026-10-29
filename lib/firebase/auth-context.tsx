@@ -40,8 +40,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const unsubscribe = onAuthStateChanged(
       authInstance,
-      (currentUser) => {
+      async (currentUser) => {
         setUser(currentUser);
+        if (currentUser) {
+          try {
+            const idToken = await currentUser.getIdToken();
+            await fetch("/api/auth/session", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ idToken }),
+            });
+          } catch (syncErr) {
+            console.warn("[Auth] Failed to sync session with backend:", syncErr);
+          }
+        }
         setLoading(false);
       },
       (err) => {
@@ -69,6 +81,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(true);
       const result = await signInWithPopup(authInstance, providerInstance);
       setUser(result.user);
+      if (result.user) {
+        const idToken = await result.user.getIdToken();
+        await fetch("/api/auth/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idToken }),
+        }).catch((err) => console.warn("[Auth] Session sync warning:", err));
+      }
       return result.user;
     } catch (err: unknown) {
       const errorObj = err as { code?: string; message?: string };
@@ -91,6 +111,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const authInstance = getFirebaseAuth();
     if (!authInstance) {
       setUser(null);
+      await fetch("/api/auth/session", { method: "DELETE" }).catch(() => {});
       return;
     }
 
@@ -98,6 +119,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(true);
       await signOut(authInstance);
       setUser(null);
+      await fetch("/api/auth/session", { method: "DELETE" }).catch(() => {});
     } catch (err: unknown) {
       const errorObj = err as { message?: string };
       console.error("[Firebase Auth] Sign out error:", err);

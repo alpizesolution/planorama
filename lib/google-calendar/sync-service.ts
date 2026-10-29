@@ -14,6 +14,7 @@ import {
   getSyncQueue,
   dequeueSyncItem,
   getDeletedGoogleEventIds,
+  isEventTombstoned,
   resolveEventConflict,
 } from "./sync-queue";
 
@@ -75,6 +76,14 @@ export function googleEventToPlannerTask(
   const isReadOnly = calendar.accessRole === "reader" || calendar.accessRole === "freeBusyReader";
   const isAvailabilityOnly = calendar.privacyMode === "availability_only" || event.visibility === "private";
 
+  let durationMinutes: number | undefined;
+  if (event.start?.dateTime && event.end?.dateTime) {
+    const startMs = new Date(event.start.dateTime).getTime();
+    const endMs = new Date(event.end.dateTime).getTime();
+    const diff = Math.round((endMs - startMs) / (60 * 1000));
+    if (diff > 0) durationMinutes = diff;
+  }
+
   let title = event.summary?.trim() || "(No title)";
   let notes = event.description?.trim() || "";
   let location: string | undefined = event.location?.trim() || undefined;
@@ -91,7 +100,8 @@ export function googleEventToPlannerTask(
   }
 
   const now = new Date().toISOString();
-  const taskId = existingTask?.id || `gcal-${calendar.id.slice(0, 16)}-${event.id}`;
+  const accountPrefix = calendar.accountId ? `${calendar.accountId.slice(0, 8)}-` : "";
+  const taskId = existingTask?.id || `gcal-${accountPrefix}${calendar.id.slice(0, 16)}-${event.id}`;
 
   return {
     id: taskId,
@@ -126,6 +136,8 @@ export function googleEventToPlannerTask(
     lastSyncedAt: now,
     syncStatus: "synced",
     recurringEventId: event.recurringEventId,
+    durationMinutes: durationMinutes ?? existingTask?.durationMinutes,
+    isAllDay: Boolean(event.start?.date && !event.start?.dateTime) || existingTask?.isAllDay,
   };
 }
 
@@ -337,14 +349,18 @@ export async function executeTwoWaySync(
     if (event.status === "cancelled") continue;
 
     // Check tombstones (ignore events previously unlinked locally)
-    if (tombstones.has(event.id)) {
+    if (isEventTombstoned(event.id, calendar.id, calendar.accountId, tombstones)) {
       continue;
     }
 
-    // Find if task already exists with this googleEventId
+    // Find if task already exists with this composite event identity: (accountId, calendarId, eventId)
     let existingTask: PlannerTask | undefined;
     for (const task of tasksMap.values()) {
-      if (task.googleEventId === event.id) {
+      if (
+        task.googleEventId === event.id &&
+        (!task.googleCalendarId || task.googleCalendarId === calendar.id) &&
+        (!task.googleAccountId || !calendar.accountId || task.googleAccountId === calendar.accountId)
+      ) {
         existingTask = task;
         break;
       }

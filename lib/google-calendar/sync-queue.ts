@@ -5,11 +5,13 @@ export type SyncActionType = "create" | "update" | "delete";
 
 export interface SyncQueueItem {
   id: string;
+  operationId: string;
   action: SyncActionType;
   taskId: string;
   googleEventId?: string;
   googleCalendarId?: string;
   googleAccountId?: string;
+  googleETag?: string;
   payload?: GoogleEventPayload;
   localUpdatedAt: string;
   attempts: number;
@@ -65,15 +67,19 @@ function saveQueue(queue: SyncQueueItem[]): void {
  * Enqueue a sync action for a task, coalescing redundant or conflicting operations.
  */
 export function enqueueSyncAction(
-  action: Omit<SyncQueueItem, "id" | "attempts" | "queuedAt">
+  action: Omit<SyncQueueItem, "id" | "attempts" | "queuedAt" | "operationId"> & {
+    operationId?: string;
+  }
 ): void {
   const queue = getSyncQueue();
   const existingIdx = queue.findIndex((item) => item.taskId === action.taskId);
 
   const now = new Date().toISOString();
+  const operationId = action.operationId || `op-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   const newItem: SyncQueueItem = {
     ...action,
     id: `queue-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    operationId,
     attempts: 0,
     queuedAt: now,
   };
@@ -163,6 +169,23 @@ export function clearSyncQueue(): void {
 }
 
 /**
+ * Composite key helper for tombstone tracking across accounts and calendars.
+ */
+export function makeTombstoneKey(
+  googleEventId: string,
+  calendarId?: string,
+  accountId?: string
+): string {
+  if (accountId && calendarId) {
+    return `${accountId}:${calendarId}:${googleEventId}`;
+  }
+  if (calendarId) {
+    return `${calendarId}:${googleEventId}`;
+  }
+  return googleEventId;
+}
+
+/**
  * Tombstones: track Google event IDs unlinked locally to prevent re-importing when
  * deleteGoogleEventOnTaskDelete is false.
  */
@@ -184,11 +207,21 @@ export function getDeletedGoogleEventIds(): Set<string> {
   return new Set(memoryTombstones);
 }
 
-export function recordDeletedGoogleEventId(googleEventId: string): void {
+export function recordDeletedGoogleEventId(
+  googleEventId: string,
+  calendarId?: string,
+  accountId?: string
+): void {
   if (!googleEventId) return;
   const current = getDeletedGoogleEventIds();
   current.add(googleEventId);
-  const arr = Array.from(current).slice(-500); // Keep max 500 tombstones
+  if (calendarId) {
+    current.add(`${calendarId}:${googleEventId}`);
+  }
+  if (accountId && calendarId) {
+    current.add(`${accountId}:${calendarId}:${googleEventId}`);
+  }
+  const arr = Array.from(current).slice(-1000); // Keep max 1000 tombstones
   memoryTombstones = arr;
 
   const storage = getStorage();
@@ -199,6 +232,23 @@ export function recordDeletedGoogleEventId(googleEventId: string): void {
       // Ignore
     }
   }
+}
+
+export function isEventTombstoned(
+  googleEventId: string,
+  calendarId?: string,
+  accountId?: string,
+  tombstoneSet?: Set<string>
+): boolean {
+  if (!googleEventId) return false;
+  const set = tombstoneSet || getDeletedGoogleEventIds();
+  if (accountId && calendarId && set.has(`${accountId}:${calendarId}:${googleEventId}`)) {
+    return true;
+  }
+  if (calendarId && set.has(`${calendarId}:${googleEventId}`)) {
+    return true;
+  }
+  return set.has(googleEventId);
 }
 
 export function clearTombstones(): void {

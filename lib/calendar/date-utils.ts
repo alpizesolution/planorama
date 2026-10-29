@@ -34,3 +34,41 @@ export function getWeekDays(date: Date, weekStartsOn: 0 | 1 | 6 = 1): Date[] {
     return d;
   });
 }
+
+/**
+ * Formats an array of week Dates into a human-readable range string.
+ * e.g. "Oct 26 – Nov 1, 2026", "Dec 28, 2026 – Jan 3, 2027", "May 4 – 10, 2026"
+ */
+export function formatWeekRange(days: Date[]): string {
+  if (days.length === 0) return "";
+  const start = days[0];
+  const end = days[days.length - 1];
+  const startMonth = start.toLocaleDateString("en-US", { month: "short" });
+  const endMonth = end.toLocaleDateString("en-US", { month: "short" });
+  if (start.getFullYear() === end.getFullYear()) {
+    if (start.getMonth() === end.getMonth()) {
+      return `${startMonth} ${start.getDate()} – ${end.getDate()}, ${start.getFullYear()}`;
+    }
+    return `${startMonth} ${start.getDate()} – ${endMonth} ${end.getDate()}, ${start.getFullYear()}`;
+  }
+  return `${startMonth} ${start.getDate()}, ${start.getFullYear()} – ${endMonth} ${end.getDate()}, ${end.getFullYear()}`;
+}
+
+/**
+ * Return an array of 5 Dates (Monday through Friday) for the workweek containing `date`.
+ * If `date` falls on Saturday or Sunday, it returns the Monday–Friday of that week.
+ */
+export function getWorkWeekDays(date: Date): Date[] {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const day = d.getDay(); // 0 is Sunday, 1 is Monday, ..., 6 is Saturday
+  const diffToMonday = day === 0 ? 6 : day - 1;
+  d.setDate(d.getDate() - diffToMonday);
+
+  return Array.from({ length: 5 }, (_, i) => {
+    const dayDate = new Date(d);
+    dayDate.setDate(d.getDate() + i);
+    return dayDate;
+  });
+}
+
+

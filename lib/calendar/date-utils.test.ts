@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { daysInMonth, getWeekDays, getWeekStart, monthGridDays, toDateKey } from "./date-utils";
+import { daysInMonth, getWeekDays, getWorkWeekDays, getWeekStart, monthGridDays, toDateKey, formatWeekRange } from "./date-utils";
 import { validateTask } from "../schedule/validation";
 
 describe("calendar date helpers", () => {
@@ -35,6 +35,57 @@ describe("calendar date helpers", () => {
     const nextWeekDays = getWeekDays(nextWeekMonday);
     expect(toDateKey(nextWeekDays[0])).toBe("2026-10-26");
     expect(toDateKey(nextWeekDays[6])).toBe("2026-11-01");
+    expect(formatWeekRange(nextWeekDays)).toBe("Oct 26 – Nov 1, 2026");
+  });
+
+  it("formats week ranges across months and years properly", () => {
+    // Single month week: May 4 – 10, 2026
+    const singleMonthDays = getWeekDays(new Date(2026, 4, 6), 1);
+    expect(formatWeekRange(singleMonthDays)).toBe("May 4 – 10, 2026");
+
+    // Cross-month week: Oct 26 – Nov 1, 2026
+    const crossMonthDays = getWeekDays(new Date(2026, 9, 28), 1);
+    expect(formatWeekRange(crossMonthDays)).toBe("Oct 26 – Nov 1, 2026");
+
+    // Cross-year week: Dec 28, 2026 – Jan 3, 2027
+    const crossYearDays = getWeekDays(new Date(2026, 11, 30), 1);
+    expect(formatWeekRange(crossYearDays)).toBe("Dec 28, 2026 – Jan 3, 2027");
+  });
+
+  it("calculates 5 workweek days (Monday–Friday) correctly including weekends and month transitions", () => {
+    // 1. Given a weekday: Wednesday, October 28, 2026
+    const wednesday = new Date(2026, 9, 28);
+    const workDays = getWorkWeekDays(wednesday);
+    expect(workDays).toHaveLength(5);
+    expect(toDateKey(workDays[0])).toBe("2026-10-26"); // Monday
+    expect(toDateKey(workDays[1])).toBe("2026-10-27"); // Tuesday
+    expect(toDateKey(workDays[2])).toBe("2026-10-28"); // Wednesday
+    expect(toDateKey(workDays[3])).toBe("2026-10-29"); // Thursday
+    expect(toDateKey(workDays[4])).toBe("2026-10-30"); // Friday
+    expect(formatWeekRange(workDays)).toBe("Oct 26 – 30, 2026");
+
+    // 2. Given a Saturday: October 31, 2026 -> returns Mon–Fri of that week
+    const saturday = new Date(2026, 9, 31);
+    const satWorkDays = getWorkWeekDays(saturday);
+    expect(satWorkDays).toHaveLength(5);
+    expect(toDateKey(satWorkDays[0])).toBe("2026-10-26"); // Monday
+    expect(toDateKey(satWorkDays[4])).toBe("2026-10-30"); // Friday
+    expect(formatWeekRange(satWorkDays)).toBe("Oct 26 – 30, 2026");
+
+    // 3. Given a Sunday: November 1, 2026 -> returns Mon–Fri of that week
+    const sunday = new Date(2026, 10, 1);
+    const sunWorkDays = getWorkWeekDays(sunday);
+    expect(sunWorkDays).toHaveLength(5);
+    expect(toDateKey(sunWorkDays[0])).toBe("2026-10-26"); // Monday
+    expect(toDateKey(sunWorkDays[4])).toBe("2026-10-30"); // Friday
+
+    // 4. Given next Monday: November 2, 2026 -> returns Nov 2–6
+    const nextMonday = new Date(2026, 10, 2);
+    const nextWorkDays = getWorkWeekDays(nextMonday);
+    expect(nextWorkDays).toHaveLength(5);
+    expect(toDateKey(nextWorkDays[0])).toBe("2026-10-02".replace("-10-02", "-11-02"));
+    expect(toDateKey(nextWorkDays[4])).toBe("2026-11-06");
+    expect(formatWeekRange(nextWorkDays)).toBe("Nov 2 – 6, 2026");
   });
 
   it("renders all 12 months for 2026 with consistent multiples of 7", () => {

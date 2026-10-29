@@ -76,5 +76,9 @@ export function validateNewTask(value: NewPlannerTask): Omit<PlannerTask, "id" |
     lastSyncedAt: value.lastSyncedAt,
     syncStatus: value.syncStatus,
     recurringEventId: value.recurringEventId,
+    durationMinutes: value.durationMinutes,
+    isAllDay: value.isAllDay,
+    itemType: value.itemType,
+    color: value.color,
   };
 }

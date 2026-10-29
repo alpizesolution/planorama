@@ -1,19 +1,19 @@
 import { NextResponse } from "next/server";
-import { getVerifiedSessionId } from "@/lib/server/session";
+import { getVerifiedSession } from "@/lib/server/session";
 import { getAllConnectedAccounts, getSyncMeta } from "@/lib/server/google-token-store";
 
 export const dynamic = "force-dynamic";
 
 /**
  * GET /api/integrations/google/status
- * Returns the current Google Calendar connection status for the authenticated session,
+ * Returns the current Google Calendar connection status for the authenticated user,
  * including all connected accounts for Virtual Assistants managing multiple clients.
  * Never exposes access tokens or refresh tokens.
  */
 export async function GET() {
   try {
-    const sessionId = await getVerifiedSessionId();
-    if (!sessionId) {
+    const session = await getVerifiedSession();
+    if (!session) {
       return NextResponse.json({
         connected: false,
         calendars: [],
@@ -21,7 +21,7 @@ export async function GET() {
       });
     }
 
-    const accounts = await getAllConnectedAccounts(sessionId);
+    const accounts = await getAllConnectedAccounts(session.userId);
     if (!accounts || accounts.length === 0) {
       return NextResponse.json({
         connected: false,
@@ -31,7 +31,7 @@ export async function GET() {
     }
 
     const primaryAccount = accounts.find((a) => a.isPrimary) || accounts[0];
-    const syncMeta = await getSyncMeta(sessionId);
+    const syncMeta = await getSyncMeta(session.userId);
 
     return NextResponse.json({
       connected: true,
