@@ -32,26 +32,26 @@ export async function GET(request: Request) {
     return NextResponse.redirect(redirectUrl.toString());
   }
 
-  // 2. Verify authenticated session
-  const session = await getVerifiedSession();
-  if (!session) {
-    const redirectUrl = new URL("/", baseUrl);
-    redirectUrl.searchParams.set("gcal_error", "session_not_found");
-    return NextResponse.redirect(redirectUrl.toString());
-  }
-
-  // 3. Verify signed OAuth state (CSRF and session fixation protection)
-  const stateVerification = verifySignedOAuthState(state, session.sessionId, undefined, session.userId);
-  if (!stateVerification.valid) {
-    console.error("[Auth/GoogleCallback] State verification failed:", stateVerification.error);
-    const destination = stateVerification.returnUrl || "/";
-    const redirectUrl = new URL(destination, baseUrl);
-    redirectUrl.searchParams.set("gcal_error", stateVerification.error || "invalid_state");
-    return NextResponse.redirect(redirectUrl.toString());
-  }
-
-  // 4. Exchange authorization code for tokens
   try {
+    // 2. Verify authenticated session
+    const session = await getVerifiedSession();
+    if (!session) {
+      const redirectUrl = new URL("/", baseUrl);
+      redirectUrl.searchParams.set("gcal_error", "session_not_found");
+      return NextResponse.redirect(redirectUrl.toString());
+    }
+
+    // 3. Verify signed OAuth state (CSRF and session fixation protection)
+    const stateVerification = verifySignedOAuthState(state, session.sessionId, undefined, session.userId);
+    if (!stateVerification.valid) {
+      console.error("[Auth/GoogleCallback] State verification failed:", stateVerification.error);
+      const destination = stateVerification.returnUrl || "/";
+      const redirectUrl = new URL(destination, baseUrl);
+      redirectUrl.searchParams.set("gcal_error", stateVerification.error || "invalid_state");
+      return NextResponse.redirect(redirectUrl.toString());
+    }
+
+    // 4. Exchange authorization code for tokens
     const tokenResult = await exchangeOAuthCode(code);
     const now = new Date().toISOString();
     const accountId = tokenResult.userEmail || "primary";

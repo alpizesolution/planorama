@@ -89,23 +89,27 @@ function isValidTimeKey(timeKey?: string | null): boolean {
  * 9. Enforces request size limits and payload validation.
  */
 export async function POST(request: Request) {
-  const session = await getVerifiedSession();
-  if (!session) {
-    return NextResponse.json({ error: "Session required." }, { status: 401 });
-  }
-
-  const syncInstanceId = crypto.randomUUID();
-
-  // 1. In-flight synchronization mutex lock with instance ownership
-  const lockAcquired = await acquireSyncLock(session.userId, 60000, syncInstanceId);
-  if (!lockAcquired) {
-    return NextResponse.json(
-      { error: "A synchronization operation is already in progress for this account. Please wait a moment." },
-      { status: 409 }
-    );
-  }
+  let sessionUserId: string | undefined;
+  let syncInstanceId: string | undefined;
 
   try {
+    const session = await getVerifiedSession();
+    if (!session) {
+      return NextResponse.json({ error: "Session required." }, { status: 401 });
+    }
+
+    sessionUserId = session.userId;
+    syncInstanceId = crypto.randomUUID();
+
+    // 1. In-flight synchronization mutex lock with instance ownership
+    const lockAcquired = await acquireSyncLock(session.userId, 60000, syncInstanceId);
+    if (!lockAcquired) {
+      return NextResponse.json(
+        { error: "A synchronization operation is already in progress for this account. Please wait a moment." },
+        { status: 409 }
+      );
+    }
+
     // 2. Request body & payload validation
     let body: SyncRequestBody;
     try {
@@ -469,6 +473,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 500 });
   } finally {
     // Always release in-flight sync lock safely with instanceId check
-    await releaseSyncLock(session.userId, syncInstanceId);
+    if (sessionUserId && syncInstanceId) {
+      await releaseSyncLock(sessionUserId, syncInstanceId);
+    }
   }
 }
