@@ -16525,18 +16525,12 @@ html, body {
 }
 
 /* ==========================================================================
-   DAILY WORKSPACE PROGRESS (circular trackers, overall bar, summary)
+   DAILY WORKSPACE PROGRESS (compact summary card)
    ========================================================================== */
 
 .daily-progress-panel {
-  --dp-tasks: #0f9d6e;
-  --dp-tasks-soft: #e3f8ee;
-  --dp-activities: #2f6bff;
-  --dp-activities-soft: #e6edff;
-  --dp-habits: #a347e6;
-  --dp-habits-soft: #f4e8ff;
-  --dp-ring-size: 112px;
-  padding: 14px 20px 16px;
+  --dp-accent: #0f9d6e;
+  padding: 10px 20px 12px;
   border-bottom: 2.5px solid var(--ink, #1e1e24);
   background: linear-gradient(180deg, #fffaf0 0%, #ffffff 100%);
 }
@@ -16559,9 +16553,8 @@ html, body {
 .dp-head-titles {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
-  flex-wrap: wrap;
 }
 
 .dp-kicker {
@@ -16574,7 +16567,7 @@ html, body {
 
 .dp-context {
   font-family: var(--font-display);
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 800;
   color: var(--ink, #1e1e24);
   letter-spacing: -0.2px;
@@ -16587,22 +16580,32 @@ html, body {
 }
 
 .dp-head-overall {
-  display: none;
-  font-size: 11.5px;
-  font-weight: 600;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 12px;
   color: #4b463f;
   white-space: nowrap;
 }
 
-.daily-progress-panel.is-collapsed .dp-head-overall {
-  display: inline;
+.dp-head-overall strong {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--ink, #1e1e24);
+}
+
+.dp-head-counts {
+  font-size: 11px;
+  font-weight: 500;
+  color: #777066;
 }
 
 .dp-collapse-btn {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border: 2px solid var(--ink, #1e1e24);
   border-radius: 8px;
   background: #fff;
@@ -16625,205 +16628,14 @@ html, body {
 }
 
 .dp-body {
-  display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
-  gap: 16px;
-  margin-top: 12px;
-  align-items: stretch;
-}
-
-/* Three trackers in one balanced row */
-.dp-rings {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.dp-ring-card {
-  --dp-color: var(--dp-tasks);
-  --dp-soft: var(--dp-tasks-soft);
+  margin-top: 8px;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 12px 8px 10px;
-  border: 2px solid var(--ink, #1e1e24);
-  border-radius: 12px;
-  background: var(--dp-soft);
-  box-shadow: 2px 2px 0 var(--shadow, #1e1e24);
-  min-width: 0;
-}
-
-.dp-tone-activities {
-  --dp-color: var(--dp-activities);
-  --dp-soft: var(--dp-activities-soft);
-}
-
-.dp-tone-habits {
-  --dp-color: var(--dp-habits);
-  --dp-soft: var(--dp-habits-soft);
-}
-
-.dp-ring-wrap {
-  position: relative;
-  width: var(--dp-ring-size);
-  max-width: 100%;
-  aspect-ratio: 1 / 1;
-}
-
-.dp-ring-svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-.dp-ring-track {
-  fill: #ffffff;
-  stroke: rgba(30, 30, 36, 0.1);
-  stroke-width: 10;
-}
-
-.dp-ring-value {
-  fill: none;
-  stroke: var(--dp-color);
-  stroke-width: 10;
-  stroke-linecap: round;
-  transition: stroke-dashoffset 0.9s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.dp-ring-card.is-empty .dp-ring-value {
-  stroke: transparent;
-}
-
-.dp-ring-center {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
-}
-
-.dp-ring-percent {
-  font-family: var(--font-display);
-  font-size: calc(var(--dp-ring-size) * 0.25);
-  font-weight: 800;
-  color: var(--ink, #1e1e24);
-  letter-spacing: -0.5px;
-}
-
-.dp-ring-percent small {
-  font-size: 0.5em;
-  font-weight: 800;
-  margin-left: 1px;
-}
-
-.dp-ring-count {
-  margin-top: 3px;
-  font-size: 11px;
-  font-weight: 700;
-  color: #5d574f;
-}
-
-.dp-ring-label {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12.5px;
-  font-weight: 800;
-  color: var(--ink, #1e1e24);
-}
-
-.dp-ring-icon {
-  display: grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 6px;
-  background: var(--dp-color);
-  color: #ffffff;
-}
-
-.dp-ring-sub {
-  font-size: 10.5px;
-  font-weight: 500;
-  color: #5d574f;
-  text-align: center;
-}
-
-/* Overall completion */
-.dp-overall {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 10px;
-  padding: 12px 14px;
-  border: 2px solid var(--ink, #1e1e24);
-  border-radius: 12px;
-  background: #ffffff;
-  box-shadow: 2px 2px 0 var(--shadow, #1e1e24);
-  min-width: 0;
-}
-
-.dp-overall-row {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.dp-overall-headline {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.dp-overall-percent {
-  font-family: var(--font-display);
-  font-size: 28px;
-  font-weight: 800;
-  line-height: 1;
-  color: var(--ink, #1e1e24);
-  letter-spacing: -0.8px;
-}
-
-.dp-overall-caption {
-  font-size: 11px;
-  font-weight: 600;
-  color: #5d574f;
-}
-
-.dp-overall-stats {
-  display: flex;
-  gap: 14px;
-  margin: 0;
-}
-
-.dp-overall-stats div {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-}
-
-.dp-overall-stats dt {
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
-  color: #777066;
-}
-
-.dp-overall-stats dd {
-  margin: 0;
-  font-size: 17px;
-  font-weight: 800;
-  color: var(--ink, #1e1e24);
+  gap: 8px;
 }
 
 .dp-bar {
-  height: 12px;
+  height: 8px;
   overflow: hidden;
   border: 1.5px solid var(--ink, #1e1e24);
   border-radius: 99px;
@@ -16834,50 +16646,78 @@ html, body {
   display: block;
   height: 100%;
   border-radius: 99px;
-  background: linear-gradient(90deg, var(--dp-tasks) 0%, var(--dp-activities) 55%, var(--dp-habits) 100%);
+  background: linear-gradient(90deg, #0f9d6e 0%, #2f6bff 55%, #a347e6 100%);
   transition: width 0.9s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* Compact daily summary */
+.dp-stats-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.dp-stats {
+  display: flex;
+  gap: 10px;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.dp-stats div {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.dp-stats dt {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: #777066;
+}
+
+.dp-stats dd {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--ink, #1e1e24);
+  line-height: 1.1;
+}
+
+/* Compact daily summary chips */
 .dp-summary {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 6px;
+  display: flex;
+  gap: 5px;
   margin: 0;
   padding: 0;
   list-style: none;
-}
-
-.dp-chip {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  grid-template-rows: auto auto;
-  column-gap: 5px;
-  align-items: center;
-  padding: 6px 8px;
-  border-radius: 9px;
-  border: 1.5px solid rgba(30, 30, 36, 0.14);
+  flex: 1;
   min-width: 0;
 }
 
-.dp-chip svg {
-  grid-row: 1;
+.dp-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  border-radius: 99px;
+  border: 1.5px solid rgba(30, 30, 36, 0.14);
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .dp-chip-value {
-  font-size: 15px;
+  font-size: 12px;
   font-weight: 800;
   color: var(--ink, #1e1e24);
 }
 
 .dp-chip-label {
-  grid-column: 1 / -1;
   font-size: 10px;
   font-weight: 600;
   color: #4b463f;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .dp-chip-completed { background: #e3f8ee; color: #0b7a55; }
@@ -16886,98 +16726,48 @@ html, body {
 .dp-chip-skipped { background: #efedea; color: #6b655d; }
 
 @media (prefers-reduced-motion: reduce) {
-  .dp-ring-value,
   .dp-bar-fill {
     transition: none;
   }
 }
 
-/* Tablet: stack trackers above overall + summary, tighten spacing */
 @media (max-width: 1024px) {
   .daily-progress-panel {
-    --dp-ring-size: 96px;
-    padding: 12px 16px 14px;
-  }
-
-  .dp-body {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 12px;
+    padding: 10px 16px 12px;
   }
 }
 
-/* Mobile: compact 3-column trackers, 2x2 summary */
 @media (max-width: 768px) {
   .daily-progress-panel {
-    --dp-ring-size: 76px;
-    padding: 10px 10px 12px;
+    padding: 8px 10px 10px;
   }
 
   .dp-context {
-    font-size: 13px;
+    font-size: 12px;
   }
 
   .dp-kicker {
     font-size: 8.5px;
   }
 
-  .dp-rings {
+  .dp-stats-row {
     gap: 8px;
   }
 
-  .dp-ring-card {
-    padding: 8px 4px;
-    gap: 4px;
-    border-radius: 10px;
-    box-shadow: 1.5px 1.5px 0 var(--shadow, #1e1e24);
-  }
-
-  .dp-ring-count {
-    font-size: 10px;
-  }
-
-  .dp-ring-label {
-    font-size: 11px;
-    gap: 4px;
-  }
-
-  .dp-ring-icon {
-    width: 16px;
-    height: 16px;
-    border-radius: 5px;
-  }
-
-  .dp-ring-sub {
-    display: none;
-  }
-
-  .dp-overall {
-    padding: 10px;
+  .dp-stats {
     gap: 8px;
-    box-shadow: 1.5px 1.5px 0 var(--shadow, #1e1e24);
   }
 
-  .dp-overall-percent {
-    font-size: 22px;
-  }
-
-  .dp-overall-stats {
-    gap: 10px;
-  }
-
-  .dp-overall-stats dd {
-    font-size: 14px;
-  }
-
-  .dp-summary {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+  .dp-stats dd {
+    font-size: 13px;
   }
 
   .dp-chip {
-    padding: 5px 6px;
+    padding: 2px 6px;
   }
 
   .dp-chip-value {
-    font-size: 13px;
+    font-size: 11px;
   }
 
   .dp-chip-label {
@@ -16985,22 +16775,9 @@ html, body {
   }
 }
 
-@media (max-width: 359px) {
+@media (max-width: 480px) {
   .dp-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-/* Very narrow phones: 2-column trackers, third centred below */
-@media (max-width: 340px) {
-  .dp-rings {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .dp-rings > .dp-ring-card:nth-child(3) {
-    grid-column: 1 / -1;
-    justify-self: center;
-    width: calc(50% - 4px);
+    flex-wrap: wrap;
   }
 }
 
