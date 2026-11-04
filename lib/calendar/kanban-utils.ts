@@ -1,14 +1,21 @@
-import type { PlannerTask } from "../schedule/types";
+import type { PlannerTask, Priority } from "../schedule/types";
 import type { GoogleCalendarConfig } from "../google-calendar/types";
 import { isTaskItem } from "./item-classifier";
 import { getWeekDays, toDateKey } from "./date-utils";
 
 export type KanbanDateFilter = "all" | "today" | "this_week" | "this_month" | "overdue" | "completed";
+export type KanbanSortKey = "due" | "priority" | "created";
+
+export const PRIORITY_ORDER: Record<Priority, number> = { p1: 0, p2: 1, p3: 2, p4: 3, none: 4 };
 
 export interface FilterKanbanTasksOptions {
   tasks: PlannerTask[];
   dateFilter: KanbanDateFilter;
-  projectFilter?: string; // "" or undefined for all, "__unassigned" for unassigned, or specific project id
+  projectFilter?: string;
+  priorityFilter?: Priority | "";
+  labelFilter?: string;
+  search?: string;
+  sortBy?: KanbanSortKey;
   todayKey: string;
   today?: Date;
   weekStartsOn?: 0 | 1 | 6;
@@ -45,31 +52,47 @@ export function filterKanbanTasks(options: FilterKanbanTasksOptions): PlannerTas
     tasks,
     dateFilter,
     projectFilter,
+    priorityFilter,
+    labelFilter,
+    search,
+    sortBy,
     todayKey,
     today = new Date(),
     weekStartsOn = 1,
   } = options;
 
-  // 1. Calculate this week's date keys
   const weekDays = getWeekDays(today, weekStartsOn);
   const thisWeekKeys = new Set(weekDays.map(toDateKey));
-
-  // 2. Current month prefix (e.g. "2026-11")
   const currentMonthPrefix = todayKey.slice(0, 7);
+  const searchLower = search?.trim().toLowerCase();
 
-  return tasks.filter((task) => {
-    // STRICT CLASSIFICATION: Only genuine tasks are ever allowed on the Kanban board!
-    if (!isTaskItem(task)) {
-      return false;
-    }
+  const filtered = tasks.filter((task) => {
+    if (!isTaskItem(task)) return false;
 
-    // Client / Project filter
+    // Project filter
     if (projectFilter) {
       if (projectFilter === "__unassigned") {
         if (task.projectId) return false;
       } else if (task.projectId !== projectFilter) {
         return false;
       }
+    }
+
+    // Priority filter
+    if (priorityFilter) {
+      if (task.priority !== priorityFilter) return false;
+    }
+
+    // Label filter
+    if (labelFilter) {
+      if (!task.labelIds?.includes(labelFilter)) return false;
+    }
+
+    // Search filter
+    if (searchLower) {
+      const inTitle = task.title.toLowerCase().includes(searchLower);
+      const inNotes = task.notes?.toLowerCase().includes(searchLower);
+      if (!inTitle && !inNotes) return false;
     }
 
     // Date filter
@@ -90,6 +113,27 @@ export function filterKanbanTasks(options: FilterKanbanTasksOptions): PlannerTas
         return true;
     }
   });
+
+  if (sortBy) {
+    filtered.sort((a, b) => {
+      if (sortBy === "priority") {
+        const pa = PRIORITY_ORDER[a.priority] ?? 4;
+        const pb = PRIORITY_ORDER[b.priority] ?? 4;
+        if (pa !== pb) return pa - pb;
+      }
+      if (sortBy === "due" || sortBy === "priority") {
+        const da = a.dueDate ?? "9999-99-99";
+        const db = b.dueDate ?? "9999-99-99";
+        if (da !== db) return da < db ? -1 : 1;
+      }
+      if (sortBy === "created") {
+        return a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0;
+      }
+      return 0;
+    });
+  }
+
+  return filtered;
 }
 
 /**
