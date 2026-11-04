@@ -9,10 +9,16 @@ import {
   MapPin,
   Calendar,
   CheckSquare,
+  CheckCircle,
+  WarningCircle,
+  Prohibit,
 } from "@phosphor-icons/react";
 import { CalendarWorkspaceHeader } from "./calendar-workspace-header";
 import type { PlannerTask } from "@/lib/schedule/types";
 import type { GoogleCalendarConfig } from "@/lib/google-calendar/types";
+import type { Habit, HabitCheckIn } from "@/lib/habits/types";
+import { computeDailyProgress, getDayItemState, type DayItemState } from "@/lib/calendar/daily-progress";
+import { DailyProgressPanel } from "./daily-progress-panel";
 import { type ResolvedCalendarTheme } from "@/lib/calendar/calendar-themes";
 import {
   getItemType,
@@ -52,9 +58,40 @@ export interface DayViewProps {
   activeCalendarCount?: number;
   currentView?: DayAppView;
   onSwitchView?: (view: DayAppView) => void;
+  /** Habit definitions and their daily check-in records, used for the Habits tracker. */
+  habits?: Habit[];
+  habitCheckIns?: HabitCheckIn[];
 }
 
 const HOUR_HEIGHT = 60; // 60px per hour -> 1px per minute
+
+const STATE_LABELS: Record<DayItemState, string> = {
+  completed: "Done",
+  in_progress: "Now",
+  upcoming: "Upcoming",
+  overdue: "Overdue",
+  cancelled: "Cancelled",
+};
+
+function StateBadge({ state }: { state: DayItemState }) {
+  if (state === "upcoming") return null;
+  const icon =
+    state === "completed" ? (
+      <CheckCircle size={10} weight="fill" />
+    ) : state === "overdue" ? (
+      <WarningCircle size={10} weight="fill" />
+    ) : state === "cancelled" ? (
+      <Prohibit size={10} weight="bold" />
+    ) : (
+      <span className="state-badge-pulse" />
+    );
+  return (
+    <span className={`day-item-state-badge state-${state}`}>
+      {icon}
+      <span>{STATE_LABELS[state]}</span>
+    </span>
+  );
+}
 
 export function DayView({
   currentDate,
@@ -70,22 +107,34 @@ export function DayView({
   onAddTask,
   onOpenTaskDetail,
   activeCalendarCount = 0,
+  habits = [],
+  habitCheckIns = [],
 }: DayViewProps) {
   const isToday = currentDateKey === todayKey;
 
-  // Track live current time for today's red indicator line
-  const [currentMinutesNow, setCurrentMinutesNow] = useState(() => {
-    const n = new Date();
-    return n.getHours() * 60 + n.getMinutes();
-  });
+  // Live clock: drives the current-time line and time-based item states (overdue / in progress)
+  const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      const n = new Date();
-      setCurrentMinutesNow(n.getHours() * 60 + n.getMinutes());
-    }, 30000); // refresh every 30s
+    const interval = setInterval(() => setNow(new Date()), 30000); // refresh every 30s
     return () => clearInterval(interval);
   }, []);
+
+  const currentMinutesNow = now.getHours() * 60 + now.getMinutes();
+  const currentTimeLabel = now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+
+  // Daily progress for the selected date only (recomputed on every date change)
+  const dailyProgress = useMemo(
+    () =>
+      computeDailyProgress({
+        tasks,
+        habits,
+        checkIns: habitCheckIns,
+        dateKey: currentDateKey,
+        now,
+      }),
+    [tasks, habits, habitCheckIns, currentDateKey, now]
+  );
 
   // Filter tasks belonging to current date
   const dayTasks = useMemo(() => {
@@ -211,6 +260,9 @@ export function DayView({
         datePickerAriaLabel="Jump to date"
       />
 
+      {/* 1b. Daily progress trackers, overall completion and summary for the selected date */}
+      <DailyProgressPanel progress={dailyProgress} />
+
       {/* 2. All-Day Events & Daily Tasks Section */}
       <div className="day-allday-container">
         <div className="day-allday-label-col">
@@ -237,11 +289,12 @@ export function DayView({
                 const itemType = getItemType(item);
                 const isAppointment = itemType === "appointment";
                 const isReadOnly = Boolean(item.isReadOnlyCalendar || calConfig?.accessRole === "reader" || calConfig?.accessRole === "freeBusyReader");
+                const itemState = getDayItemState(item, currentDateKey, now);
 
                 return (
                   <div
                     key={item.id}
-                    className={`day-allday-pill ${tileStyle.className} ${item.status === "completed" ? "is-completed" : ""}`}
+                    className={`day-allday-pill ${tileStyle.className} state-${itemState} ${itemState === "completed" ? "is-completed" : ""}`}
                     style={{
                       ...tileStyle.style,
                     }}
@@ -260,6 +313,9 @@ export function DayView({
                       style={{ backgroundColor: tileStyle.indicatorColor }}
                     />
                     <span className="allday-pill-title">{item.title}</span>
+                    {(itemState === "overdue" || itemState === "cancelled" || item.status === "completed") && (
+                      <StateBadge state={itemState} />
+                    )}
                     {item.isGoogleEvent ? (
                       <span className="allday-pill-source-badge">
                         <Calendar size={10} weight="fill" />
@@ -334,16 +390,25 @@ export function DayView({
               </div>
             ))}
 
-            {/* Red Current Time Line (Visible when viewing today) */}
+            {/* Elapsed-time shading + red current time line (visible when viewing today) */}
+            {isToday && (
+              <div
+                className="day-elapsed-shade"
+                style={{ height: `${(currentMinutesNow / 60) * HOUR_HEIGHT}px` }}
+                aria-hidden="true"
+              />
+            )}
             {isToday && (
               <div
                 className="day-current-time-line"
                 style={{ top: `${(currentMinutesNow / 60) * HOUR_HEIGHT}px` }}
-                title={`Current time: ${new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`}
+                title={`Current time: ${currentTimeLabel}`}
+                role="img"
+                aria-label={`Current time ${currentTimeLabel}`}
               >
                 <span className="current-time-dot" />
                 <span className="current-time-badge">
-                  {new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+                  Now · {currentTimeLabel}
                 </span>
               </div>
             )}
@@ -360,16 +425,22 @@ export function DayView({
               const heightPx = Math.max(30, (durationMinutes / 60) * HOUR_HEIGHT - 2);
               const widthPercent = 100 / totalColumns;
               const leftPercent = column * widthPercent;
+              const itemState = getDayItemState(task, currentDateKey, now);
+              // Short cards only show the title + state; crowded overlaps compact further on small screens (CSS)
+              const isCompact = heightPx < 44;
 
               return (
                 <div
                   key={task.id}
-                  className={`day-timeline-event ${tileStyle.className} ${task.status === "completed" ? "is-completed" : ""} ${task.isPinned ? "is-pinned" : ""}`}
+                  className={`day-timeline-event ${tileStyle.className} state-${itemState} ${itemState === "completed" ? "is-completed" : ""} ${task.isPinned ? "is-pinned" : ""} ${isCompact ? "is-compact" : ""} ${totalColumns > 1 ? "is-overlapping" : ""}`}
+                  data-state={itemState}
+                  data-columns={totalColumns > 2 ? "many" : totalColumns}
                   style={{
                     top: `${topPx}px`,
                     height: `${heightPx}px`,
                     left: `calc(${leftPercent}% + 2px)`,
                     width: `calc(${widthPercent}% - 4px)`,
+                    zIndex: 10 + column,
                     ...tileStyle.style,
                   }}
                   onClick={(e) => {
@@ -385,7 +456,8 @@ export function DayView({
                       onOpenTaskDetail(task);
                     }
                   }}
-                  title={`${task.title} (${formatTimeRange(startMinutes, endMinutes)})${task.googleCalendarName ? ` · ${task.googleCalendarName}` : ""}`}
+                  title={`${task.title} (${formatTimeRange(startMinutes, endMinutes)})${task.googleCalendarName ? ` · ${task.googleCalendarName}` : ""} · ${STATE_LABELS[itemState]}`}
+                  aria-label={`${task.title}, ${formatTimeRange(startMinutes, endMinutes)}, ${STATE_LABELS[itemState]}`}
                 >
                   <div className="timeline-event-header">
                     <div className="timeline-event-title-wrap">
@@ -399,11 +471,14 @@ export function DayView({
                       )}
                       <span className="timeline-event-title">{task.title}</span>
                     </div>
-                    {isReadOnly && (
-                      <span className="timeline-event-lock" title="Read-only calendar">
-                        <Lock size={11} weight="bold" />
-                      </span>
-                    )}
+                    <span className="timeline-event-header-right">
+                      <StateBadge state={itemState} />
+                      {isReadOnly && (
+                        <span className="timeline-event-lock" title="Read-only calendar">
+                          <Lock size={11} weight="bold" />
+                        </span>
+                      )}
+                    </span>
                   </div>
 
                   <div className="timeline-event-meta">
@@ -449,6 +524,12 @@ export function DayView({
           </span>
           <span className="legend-chip">
             <span className="legend-chip-box items-chip" /> {dayTasks.length} Scheduled Item(s)
+          </span>
+          <span className="legend-chip day-state-legend" aria-label="Timeline status key">
+            <span className="legend-state-swatch state-completed" /> Done
+            <span className="legend-state-swatch state-in_progress" /> Now
+            <span className="legend-state-swatch state-overdue" /> Overdue
+            <span className="legend-state-swatch state-cancelled" /> Cancelled
           </span>
         </div>
         <span className="day-footer-hint">Click any empty time slot on the grid to create an event ✳</span>

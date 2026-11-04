@@ -51,6 +51,11 @@ export type PlannerTask = {
   isAllDay?: boolean;
   isHoliday?: boolean;
   eventType?: string;
+  /**
+   * Lifecycle status of a calendar event (mirrors Google Calendar's event.status).
+   * A "cancelled" event stays visible in the Day View but never counts as completed.
+   */
+  eventStatus?: "confirmed" | "tentative" | "cancelled";
   itemType?: import("../calendar/item-color").PlannerItemType;
   color?: string;
   textColor?: string;
