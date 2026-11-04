@@ -575,7 +575,7 @@ button.nav-item{background:transparent;cursor:pointer}
 
 
 /* ===== KANBAN VIEW ===== */
-.kanban-board{padding:0}
+.kanban-board{padding:0;position:relative}
 .kanban-columns{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:20px}
 .kanban-col{min-height:240px;border:1.5px solid #e8dfd1;border-radius:10px;background:#faf8f3;display:flex;flex-direction:column}
 .kanban-col-header{display:flex;align-items:center;gap:8px;padding:14px 14px 12px;border-bottom:1px solid #e8dfd1}
@@ -782,6 +782,41 @@ button.nav-item{background:transparent;cursor:pointer}
   .kanban-h2{font-size:18px}
   .klt-col-due{display:none}
 }
+
+/* ===== KANBAN IMPROVEMENTS ===== */
+/* Quick-complete button */
+.kanban-quick-complete{display:flex;align-items:center;justify-content:center;width:20px;height:20px;border:none;background:none;cursor:pointer;color:#94a3b8;padding:0;flex-shrink:0;border-radius:50%;transition:color .15s,transform .1s}
+.kanban-quick-complete:hover{color:#10b981;transform:scale(1.15)}
+.kanban-quick-complete.is-done{color:#10b981}
+/* Multi-select checkbox */
+.kanban-tile-select-btn{display:flex;align-items:center;justify-content:center;width:18px;height:18px;border:none;background:none;cursor:pointer;padding:0;flex-shrink:0;opacity:0;transition:opacity .15s;border-radius:50%}
+.kanban-tile-v2:hover .kanban-tile-select-btn,.kanban-tile-v2.is-selected .kanban-tile-select-btn{opacity:1}
+.kanban-select-checked{color:#3b5bff}
+.kanban-select-unchecked{color:#94a3b8}
+.kanban-tile-v2.is-selected{outline:2px solid #3b5bff;outline-offset:1px}
+/* Bulk action bar */
+.kanban-bulk-bar{position:sticky;bottom:16px;z-index:100;display:flex;align-items:center;gap:10px;margin:0 24px;padding:10px 14px;background:var(--ink);color:#fff;border-radius:10px;box-shadow:4px 4px 0 rgba(0,0,0,.35);flex-wrap:wrap}
+.kanban-bulk-count{font-size:12px;font-weight:700;white-space:nowrap}
+.kanban-bulk-actions{display:flex;gap:6px;flex:1;flex-wrap:wrap}
+.kanban-bulk-btn{display:flex;align-items:center;gap:5px;padding:5px 10px;font-size:11px;font-weight:700;background:rgba(255,255,255,.12);border:1.5px solid rgba(255,255,255,.25);color:#fff;border-radius:6px;cursor:pointer;transition:background .15s}
+.kanban-bulk-btn:hover{background:rgba(255,255,255,.22)}
+.kanban-bulk-delete{background:rgba(220,38,38,.25);border-color:rgba(220,38,38,.5)}
+.kanban-bulk-delete:hover{background:rgba(220,38,38,.4)}
+.kanban-bulk-dismiss{display:flex;align-items:center;justify-content:center;width:24px;height:24px;border:none;background:rgba(255,255,255,.12);color:#fff;border-radius:50%;cursor:pointer;padding:0;flex-shrink:0}
+/* Keyboard shortcuts button */
+.kanban-shortcuts-btn{position:absolute;top:20px;right:20px;display:flex;align-items:center;justify-content:center;width:28px;height:28px;border:1.5px solid var(--ink);background:#fff;border-radius:6px;cursor:pointer;box-shadow:2px 2px 0 var(--ink);transition:box-shadow .1s,transform .1s;color:var(--ink)}
+.kanban-shortcuts-btn:hover{box-shadow:3px 3px 0 var(--ink);transform:translate(-1px,-1px)}
+/* Shortcuts modal */
+.kanban-shortcuts-overlay{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center}
+.kanban-shortcuts-modal{background:#fff;border:2px solid var(--ink);border-radius:12px;box-shadow:5px 5px 0 var(--ink);width:280px;overflow:hidden}
+.kanban-shortcuts-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:#ffe14d;border-bottom:2px solid var(--ink);font-weight:700;font-size:13px}
+.kanban-shortcuts-header button{border:none;background:none;cursor:pointer;padding:2px;border-radius:4px}
+.kanban-shortcuts-list{padding:12px 16px;display:flex;flex-direction:column;gap:8px}
+.ks-row{display:flex;align-items:center;gap:12px;font-size:13px}
+.ks-row kbd{display:inline-flex;align-items:center;justify-content:center;min-width:28px;padding:2px 6px;background:#f1f5f9;border:1.5px solid #94a3b8;border-radius:5px;font-size:11px;font-weight:700;font-family:monospace;box-shadow:0 2px 0 #94a3b8}
+/* Agenda grouping tabs */
+.agenda-group-tabs{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.agenda-group-label{font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.04em;margin-right:2px}
 
 /* ===== COMPACT PRIORITY & ORGANIZATION CONTROL ===== */
 .priority-org-container {
