@@ -1,6 +1,7 @@
 import { validateNewTask, validateTask } from "./validation";
 import { deleteLocalTask, listLocalTasks, saveLocalTask } from "./local-store";
 import type { NewPlannerTask, PlannerTask } from "./types";
+import { generateId } from "./id";
 
 export async function getTasks(): Promise<PlannerTask[]> {
   return listLocalTasks();
@@ -9,7 +10,7 @@ export async function getTasks(): Promise<PlannerTask[]> {
 export async function createTask(input: NewPlannerTask): Promise<PlannerTask> {
   const now = new Date().toISOString();
   const fields = validateNewTask(input);
-  const task: PlannerTask = { ...fields, id: crypto.randomUUID(), createdAt: now, updatedAt: now };
+  const task: PlannerTask = { ...fields, id: generateId(), createdAt: now, updatedAt: now };
   await saveLocalTask(task);
   return task;
 }

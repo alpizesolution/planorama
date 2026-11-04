@@ -29,20 +29,38 @@ function runTransaction<T>(mode: IDBTransactionMode, work: (store: IDBObjectStor
   }));
 }
 
+let memoryTasks: PlannerTask[] = [];
+
+function getStorage(): Storage | null {
+  if (typeof window !== "undefined" && window.localStorage) return window.localStorage;
+  if (typeof localStorage !== "undefined") return localStorage;
+  return null;
+}
+
 function readFallback(): PlannerTask[] {
   try {
-    const raw = localStorage.getItem(FALLBACK_KEY);
-    if (!raw) return [];
+    const storage = getStorage();
+    if (!storage) return memoryTasks;
+    const raw = storage.getItem(FALLBACK_KEY);
+    if (!raw) return memoryTasks;
     const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map(validateTask);
+    if (!Array.isArray(parsed)) return memoryTasks;
+    const tasks = parsed.map(validateTask);
+    memoryTasks = tasks;
+    return tasks;
   } catch {
-    return [];
+    return memoryTasks;
   }
 }
 
 function writeFallback(tasks: PlannerTask[]): void {
-  localStorage.setItem(FALLBACK_KEY, JSON.stringify(tasks));
+  memoryTasks = tasks;
+  try {
+    const storage = getStorage();
+    storage?.setItem(FALLBACK_KEY, JSON.stringify(tasks));
+  } catch {
+    // Handle storage quota exceeded or disabled cookies/storage
+  }
 }
 
 export async function listLocalTasks(): Promise<PlannerTask[]> {
@@ -69,9 +87,10 @@ export async function saveLocalTask(task: PlannerTask): Promise<void> {
       request.onerror = () => reject(request.error);
     });
   } catch {
-    const tasks = readFallback();
-    writeFallback([...tasks.filter((item) => item.id !== valid.id), valid]);
+    // If IndexedDB fails, continue and persist in fallback
   }
+  const tasks = readFallback();
+  writeFallback([...tasks.filter((item) => item.id !== valid.id), valid]);
 }
 
 export async function deleteLocalTask(id: string): Promise<void> {
@@ -82,6 +101,7 @@ export async function deleteLocalTask(id: string): Promise<void> {
       request.onerror = () => reject(request.error);
     });
   } catch {
-    writeFallback(readFallback().filter((task) => task.id !== id));
+    // If IndexedDB fails, continue and remove from fallback
   }
+  writeFallback(readFallback().filter((task) => task.id !== id));
 }
