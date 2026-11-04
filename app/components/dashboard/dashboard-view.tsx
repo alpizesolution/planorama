@@ -51,6 +51,7 @@ interface DashboardViewProps {
   onToggleTask: (task: PlannerTask) => void;
   onEditTask: (task: PlannerTask) => void;
   onDeleteTask: (task: PlannerTask) => void;
+  onRescheduleToToday?: (taskId: string) => void;
   onViewCalendar: () => void;
   onOpenPreferences: () => void;
   onRestoreWidgets: () => void;
@@ -81,6 +82,7 @@ export function DashboardView({
   onToggleTask,
   onEditTask,
   onDeleteTask,
+  onRescheduleToToday,
   onViewCalendar,
   onRestoreWidgets,
   onSaveWidgetConfigs,
@@ -370,6 +372,7 @@ export function DashboardView({
             tasks={tasks}
             todayKey={todayKey}
             onQuickAdd={onQuickAdd}
+            checkIns={checkIns}
           />
         );
 
@@ -411,6 +414,7 @@ export function DashboardView({
             onEditTask={onEditTask}
             onQuickAdd={onQuickAdd}
             onViewCalendar={onViewCalendar}
+            onRescheduleToToday={onRescheduleToToday}
             priorityLabel={priorityLabel}
             priorityEmoji={priorityEmoji}
             itemColors={itemColors}

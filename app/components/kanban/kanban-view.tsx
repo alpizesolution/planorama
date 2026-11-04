@@ -113,32 +113,29 @@ export function KanbanView({
   initialDateFilter = "all",
   initialProjectFilter = "",
 }: KanbanViewProps) {
-  // Initialize filters from localStorage if available
-  const [dateFilter, setDateFilter] = useState<KanbanDateFilter>(() => {
-    try { return (localStorage.getItem("kanban-dateFilter") as KanbanDateFilter) || initialDateFilter; }
-    catch { return initialDateFilter; }
-  });
-  const [projectFilter, setProjectFilter] = useState<string>(() => {
-    try { return localStorage.getItem("kanban-projectFilter") || initialProjectFilter; }
-    catch { return initialProjectFilter; }
-  });
-  const [priorityFilter, setPriorityFilter] = useState<Priority | "">(() => {
-    try { return (localStorage.getItem("kanban-priorityFilter") as Priority) || ""; }
-    catch { return ""; }
-  });
-  const [labelFilter, setLabelFilter] = useState<string>(() => {
-    try { return localStorage.getItem("kanban-labelFilter") || ""; }
-    catch { return ""; }
-  });
+  const lsGet = (key: string) => {
+    if (typeof window === "undefined") return null;
+    try { return localStorage.getItem(key); } catch { return null; }
+  };
+  const [dateFilter, setDateFilter] = useState<KanbanDateFilter>(
+    () => (lsGet("kanban-dateFilter") as KanbanDateFilter) || initialDateFilter
+  );
+  const [projectFilter, setProjectFilter] = useState<string>(
+    () => lsGet("kanban-projectFilter") || initialProjectFilter
+  );
+  const [priorityFilter, setPriorityFilter] = useState<Priority | "">(
+    () => (lsGet("kanban-priorityFilter") as Priority) || ""
+  );
+  const [labelFilter, setLabelFilter] = useState<string>(
+    () => lsGet("kanban-labelFilter") || ""
+  );
   const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState<KanbanSortKey>(() => {
-    try { return (localStorage.getItem("kanban-sortBy") as KanbanSortKey) || "due"; }
-    catch { return "due"; }
-  });
-  const [viewMode, setViewMode] = useState<"board" | "list">(() => {
-    try { return (localStorage.getItem("kanban-viewMode") as "board" | "list") || "board"; }
-    catch { return "board"; }
-  });
+  const [sortBy, setSortBy] = useState<KanbanSortKey>(
+    () => (lsGet("kanban-sortBy") as KanbanSortKey) || "due"
+  );
+  const [viewMode, setViewMode] = useState<"board" | "list">(
+    () => (lsGet("kanban-viewMode") as "board" | "list") || "board"
+  );
   const [dragTaskId, setDragTaskId] = useState<string | null>(null);
   const [dragOverCol, setDragOverCol] = useState<PlannerTask["status"] | null>(null);
   const [mobileColumn, setMobileColumn] = useState<PlannerTask["status"]>("open");

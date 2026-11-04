@@ -4775,7 +4775,7 @@ button.nav-item{background:transparent;cursor:pointer}
 
 .dashboard-grid-item.item-width-full .daily-stats-grid,
 .dashboard-grid-item.item-width-large .daily-stats-grid {
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
 }
 
 .dashboard-grid-item.item-width-full .dashboard-task-item {
@@ -5158,7 +5158,7 @@ button.nav-item{background:transparent;cursor:pointer}
 
 .daily-stats-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 1rem;
   margin-bottom: 1.25rem;
 }
@@ -5213,6 +5213,66 @@ button.nav-item{background:transparent;cursor:pointer}
   background: #fefce8;
   border-color: #fde047;
   color: #854d0e;
+}
+
+.daily-stat-tile.stat-streak {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #64748b;
+}
+
+.daily-stat-tile.stat-streak.has-streak {
+  background: #fff7ed;
+  border-color: #fed7aa;
+  color: #9a3412;
+}
+
+.daily-stat-streak-emoji {
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+/* Dot color CSS variables for mini calendar */
+:root {
+  --color-overdue-dot: #ef4444;
+  --color-today-dot: #f59e0b;
+}
+
+/* Reschedule-to-today button on overdue task rows */
+.upcoming-overdue-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.upcoming-reschedule-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1.5px solid var(--ink, #111);
+  background: #fff;
+  color: var(--ink, #111);
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, transform 0.1s;
+  box-shadow: 1.5px 1.5px 0 var(--ink, #111);
+}
+
+.upcoming-reschedule-btn:hover {
+  background: #f0fdf4;
+  color: #166534;
+  border-color: #86efac;
+  box-shadow: 1.5px 1.5px 0 #86efac;
+}
+
+.upcoming-reschedule-btn:active {
+  transform: translate(1px, 1px);
+  box-shadow: none;
 }
 
 .daily-stat-icon-wrap {
