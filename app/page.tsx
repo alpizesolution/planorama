@@ -6,6 +6,7 @@ import {
   CheckCircle,
   Circle,
   Plus,
+  Sun,
   X,
   DotsSixVertical,
   CaretDown,
@@ -47,6 +48,7 @@ import { MonthView } from "@/app/components/calendar/month-view";
 import { WeekView } from "@/app/components/calendar/week-view";
 import { YearView } from "@/app/components/calendar/year-view";
 import { AgendaView } from "@/app/components/calendar/agenda-view";
+import { HolidaysView } from "@/app/components/calendar/holidays-view";
 import { UserProfileButton } from "@/app/components/auth/user-profile-button";
 import {
   executeTwoWaySync,
@@ -519,7 +521,7 @@ export default function HomePage() {
     let base = today;
     if (view === "week" || view === "workWeek") {
       base = weeklyAnchorDate;
-    } else if (view === "day" || view === "agenda" || view === "dashboard" || view === "kanban") {
+    } else if (view === "day" || view === "agenda" || view === "dashboard" || view === "kanban" || view === "holidays") {
       if (selectedDate) {
         const [y, m, d] = selectedDate.split("-").map(Number);
         base = new Date(y, m - 1, d);
@@ -2798,6 +2800,16 @@ export default function HomePage() {
               itemStyles={preferences.itemStyles ?? DEFAULT_ITEM_STYLES}
             />
           )}
+
+          {view === "holidays" && (
+            <HolidaysView
+              today={today}
+              todayKey={todayKey}
+              tasks={displayedTasks}
+              allCalendarConfigs={activeCalendarConfigs}
+              resolvedTheme={resolvedTheme}
+            />
+          )}
         </CalendarWorkspaceShell>
         )}
       </div>
@@ -3045,7 +3057,7 @@ export default function HomePage() {
 
       <button
         type="button"
-        className={`mobile-nav-item ${isMoreMenuOpen || ["agenda", "settings"].includes(view) ? "is-active" : ""}`}
+        className={`mobile-nav-item ${isMoreMenuOpen || ["agenda", "holidays", "settings"].includes(view) ? "is-active" : ""}`}
         onClick={() => setIsMoreMenuOpen((prev) => !prev)}
         aria-label="More views and options"
         aria-expanded={isMoreMenuOpen}
@@ -3203,6 +3215,24 @@ export default function HomePage() {
               <div className="more-card-info">
                 <strong>Yearline</strong>
                 <small>Horizontal annual strip</small>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className={`mobile-more-card ${view === "holidays" ? "is-selected" : ""}`}
+              onClick={() => {
+                setView("holidays");
+                syncViewUrl("holidays");
+                setIsMoreMenuOpen(false);
+              }}
+            >
+              <span className="more-card-icon" style={{ background: "#fce7e7" }}>
+                <Sun size={20} />
+              </span>
+              <div className="more-card-info">
+                <strong>Holidays</strong>
+                <small>Public &amp; special days</small>
               </div>
             </button>
 

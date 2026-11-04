@@ -10,6 +10,7 @@ export type AppView =
   | "week"
   | "workWeek"
   | "kanban"
+  | "holidays"
   | "settings";
 
 export const DEFAULT_VIEW: AppView = "dashboard";
@@ -24,6 +25,7 @@ export const NAV_VIEWS: { id: AppView; label: string }[] = [
   { id: "yearline", label: "Yearline" },
   { id: "agenda", label: "Agenda" },
   { id: "kanban", label: "Board" },
+  { id: "holidays", label: "Holidays" },
 ];
 
 /**
@@ -31,7 +33,7 @@ export const NAV_VIEWS: { id: AppView; label: string }[] = [
  */
 export function isValidView(view: unknown): view is AppView {
   if (typeof view !== "string") return false;
-  return NAV_VIEWS.some((v) => v.id === view) || view === "settings";
+  return NAV_VIEWS.some((v) => v.id === view) || view === "settings" || view === "holidays";
 }
 
 /**

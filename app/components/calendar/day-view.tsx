@@ -37,7 +37,7 @@ import {
   type PositionedDayEvent,
 } from "@/lib/calendar/day-layout";
 
-export type DayAppView = "dashboard" | "day" | "month" | "year" | "yearline" | "agenda" | "week" | "workWeek" | "kanban" | "settings";
+export type DayAppView = "dashboard" | "day" | "month" | "year" | "yearline" | "agenda" | "week" | "workWeek" | "kanban" | "holidays" | "settings";
 
 export interface DayViewProps {
   currentDate: Date;
