@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useRef, useCallback } from "react";
+import { useMemo, useState, useRef, useCallback, useEffect } from "react";
 import {
   Plus,
   DotsSixVertical,
@@ -16,6 +16,11 @@ import {
   Warning,
   CaretRight,
   X,
+  CheckCircle,
+  Circle,
+  Trash,
+  ArrowRight,
+  Keyboard,
 } from "@phosphor-icons/react";
 import type { PlannerTask, Priority } from "@/lib/schedule/types";
 import type { GoogleCalendarConfig } from "@/lib/google-calendar/types";
@@ -53,6 +58,7 @@ export interface KanbanViewProps {
   onOpenTaskDetail: (task: PlannerTask) => void;
   onAddTask: (options?: { date?: string | null; time?: string | null; status?: PlannerTask["status"]; projectId?: string | null }) => void;
   onMoveTaskStatus: (taskId: string, newStatus: PlannerTask["status"]) => void;
+  onDeleteTasks?: (taskIds: string[]) => void;
   priorityLabel: (p: PlannerTask["priority"]) => string;
   priorityEmoji: (p: PlannerTask["priority"]) => string;
   itemStyles?: ItemStylesPreferences;
@@ -99,6 +105,7 @@ export function KanbanView({
   onOpenTaskDetail,
   onAddTask,
   onMoveTaskStatus,
+  onDeleteTasks,
   priorityLabel,
   priorityEmoji,
   itemStyles = DEFAULT_ITEM_STYLES,
@@ -106,26 +113,120 @@ export function KanbanView({
   initialDateFilter = "all",
   initialProjectFilter = "",
 }: KanbanViewProps) {
-  const [dateFilter, setDateFilter] = useState<KanbanDateFilter>(initialDateFilter);
-  const [projectFilter, setProjectFilter] = useState<string>(initialProjectFilter);
-  const [priorityFilter, setPriorityFilter] = useState<Priority | "">("");
-  const [labelFilter, setLabelFilter] = useState<string>("");
+  // Initialize filters from localStorage if available
+  const [dateFilter, setDateFilter] = useState<KanbanDateFilter>(() => {
+    try { return (localStorage.getItem("kanban-dateFilter") as KanbanDateFilter) || initialDateFilter; }
+    catch { return initialDateFilter; }
+  });
+  const [projectFilter, setProjectFilter] = useState<string>(() => {
+    try { return localStorage.getItem("kanban-projectFilter") || initialProjectFilter; }
+    catch { return initialProjectFilter; }
+  });
+  const [priorityFilter, setPriorityFilter] = useState<Priority | "">(() => {
+    try { return (localStorage.getItem("kanban-priorityFilter") as Priority) || ""; }
+    catch { return ""; }
+  });
+  const [labelFilter, setLabelFilter] = useState<string>(() => {
+    try { return localStorage.getItem("kanban-labelFilter") || ""; }
+    catch { return ""; }
+  });
   const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState<KanbanSortKey>("due");
-  const [viewMode, setViewMode] = useState<"board" | "list">("board");
+  const [sortBy, setSortBy] = useState<KanbanSortKey>(() => {
+    try { return (localStorage.getItem("kanban-sortBy") as KanbanSortKey) || "due"; }
+    catch { return "due"; }
+  });
+  const [viewMode, setViewMode] = useState<"board" | "list">(() => {
+    try { return (localStorage.getItem("kanban-viewMode") as "board" | "list") || "board"; }
+    catch { return "board"; }
+  });
   const [dragTaskId, setDragTaskId] = useState<string | null>(null);
   const [dragOverCol, setDragOverCol] = useState<PlannerTask["status"] | null>(null);
   const [mobileColumn, setMobileColumn] = useState<PlannerTask["status"]>("open");
   const [collapsedCols, setCollapsedCols] = useState<Set<string>>(new Set());
   const [wipLimit, setWipLimit] = useState<number>(0);
   const [showWipInput, setShowWipInput] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showShortcuts, setShowShortcuts] = useState(false);
   const addInProgressRef = useRef<boolean>(false);
+  // Touch drag state
+  const touchDragRef = useRef<{ taskId: string; startX: number; startY: number; ghost: HTMLElement | null } | null>(null);
 
   const toggleCollapse = useCallback((colKey: string) => {
     setCollapsedCols((prev) => {
       const next = new Set(prev);
       if (next.has(colKey)) next.delete(colKey);
       else next.add(colKey);
+      return next;
+    });
+  }, []);
+
+  // Persist filters to localStorage
+  useEffect(() => { try { localStorage.setItem("kanban-dateFilter", dateFilter); } catch {} }, [dateFilter]);
+  useEffect(() => { try { localStorage.setItem("kanban-projectFilter", projectFilter); } catch {} }, [projectFilter]);
+  useEffect(() => { try { localStorage.setItem("kanban-priorityFilter", priorityFilter); } catch {} }, [priorityFilter]);
+  useEffect(() => { try { localStorage.setItem("kanban-labelFilter", labelFilter); } catch {} }, [labelFilter]);
+  useEffect(() => { try { localStorage.setItem("kanban-sortBy", sortBy); } catch {} }, [sortBy]);
+  useEffect(() => { try { localStorage.setItem("kanban-viewMode", viewMode); } catch {} }, [viewMode]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
+      if (e.key === "?") { e.preventDefault(); setShowShortcuts((v) => !v); }
+      if (e.key === "n" || e.key === "N") { e.preventDefault(); handleAddTask("open"); }
+      if (e.key === "k" || e.key === "K") {
+        e.preventDefault();
+        document.getElementById("kanban-view")?.scrollIntoView({ behavior: "smooth" });
+      }
+      if (e.key === "Escape") { setShowShortcuts(false); setSelectedIds(new Set()); }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Touch drag helpers
+  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>, taskId: string) => {
+    if ((e.target as HTMLElement).closest("button, select, input, a")) return;
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+    const rect = el.getBoundingClientRect();
+    const ghost = el.cloneNode(true) as HTMLElement;
+    ghost.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;opacity:0.8;z-index:9999;pointer-events:none;transform:scale(1.03);box-shadow:0 8px 24px rgba(0,0,0,0.25);`;
+    document.body.appendChild(ghost);
+    touchDragRef.current = { taskId, startX: e.clientX, startY: e.clientY, ghost };
+  }, []);
+
+  const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!touchDragRef.current?.ghost) return;
+    const dx = e.clientX - touchDragRef.current.startX;
+    const dy = e.clientY - touchDragRef.current.startY;
+    const rect = e.currentTarget.getBoundingClientRect();
+    touchDragRef.current.ghost.style.left = `${rect.left + dx}px`;
+    touchDragRef.current.ghost.style.top = `${rect.top + dy}px`;
+    // Highlight drop target column
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const col = el?.closest("[data-col-key]") as HTMLElement | null;
+    if (col) setDragOverCol(col.dataset.colKey as PlannerTask["status"]);
+    else setDragOverCol(null);
+  }, []);
+
+  const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!touchDragRef.current) return;
+    const { taskId, ghost } = touchDragRef.current;
+    ghost?.remove();
+    touchDragRef.current = null;
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const col = el?.closest("[data-col-key]") as HTMLElement | null;
+    if (col?.dataset.colKey) onMoveTaskStatus(taskId, col.dataset.colKey as PlannerTask["status"]);
+    setDragOverCol(null);
+    setDragTaskId(null);
+  }, [onMoveTaskStatus]);
+
+  const toggleSelect = useCallback((taskId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
       return next;
     });
   }, []);
@@ -504,6 +605,77 @@ export function KanbanView({
         </div>
       )}
 
+      {/* ── Keyboard shortcuts toggle ── */}
+      <button
+        type="button"
+        className="kanban-shortcuts-btn"
+        onClick={() => setShowShortcuts((v) => !v)}
+        title="Keyboard shortcuts (?)"
+        aria-label="Show keyboard shortcuts"
+      >
+        <Keyboard size={14} />
+      </button>
+
+      {/* ── Keyboard shortcuts modal ── */}
+      {showShortcuts && (
+        <div className="kanban-shortcuts-overlay" onClick={() => setShowShortcuts(false)}>
+          <div className="kanban-shortcuts-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="kanban-shortcuts-header">
+              <span>Keyboard Shortcuts</span>
+              <button type="button" onClick={() => setShowShortcuts(false)} aria-label="Close"><X size={14} /></button>
+            </div>
+            <div className="kanban-shortcuts-list">
+              <div className="ks-row"><kbd>N</kbd><span>New task</span></div>
+              <div className="ks-row"><kbd>K</kbd><span>Scroll to Kanban</span></div>
+              <div className="ks-row"><kbd>?</kbd><span>Toggle shortcuts</span></div>
+              <div className="ks-row"><kbd>Esc</kbd><span>Close / deselect all</span></div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Bulk action bar ── */}
+      {selectedIds.size > 0 && (
+        <div className="kanban-bulk-bar" role="toolbar" aria-label="Bulk actions">
+          <span className="kanban-bulk-count">{selectedIds.size} selected</span>
+          <div className="kanban-bulk-actions">
+            {KANBAN_COLUMNS.map((col) => (
+              <button
+                key={col.key}
+                type="button"
+                className="kanban-bulk-btn"
+                onClick={() => {
+                  for (const id of selectedIds) onMoveTaskStatus(id, col.key);
+                  setSelectedIds(new Set());
+                }}
+              >
+                <ArrowRight size={12} /> Move to {col.label}
+              </button>
+            ))}
+            {onDeleteTasks && (
+              <button
+                type="button"
+                className="kanban-bulk-btn kanban-bulk-delete"
+                onClick={() => {
+                  onDeleteTasks([...selectedIds]);
+                  setSelectedIds(new Set());
+                }}
+              >
+                <Trash size={12} /> Delete
+              </button>
+            )}
+          </div>
+          <button
+            type="button"
+            className="kanban-bulk-dismiss"
+            onClick={() => setSelectedIds(new Set())}
+            aria-label="Clear selection"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
       {/* ── Board View ── */}
       {viewMode === "board" && (
         <div className="kanban-columns kanban-columns-v2">
@@ -516,6 +688,7 @@ export function KanbanView({
             return (
               <div
                 key={col.key}
+                data-col-key={col.key}
                 className={`kanban-col kanban-col-v2 kanban-col-${col.key}${isMobileActive ? " is-mobile-active-col" : " is-mobile-hidden-col"}${isCollapsed ? " is-collapsed" : ""}${dragOverCol === col.key ? " kanban-drag-over" : ""}`}
                 onDragOver={(e) => { e.preventDefault(); setDragOverCol(col.key); }}
                 onDragLeave={(e) => {
@@ -646,7 +819,7 @@ export function KanbanView({
                       return (
                         <div
                           key={task.id}
-                          className={`kanban-tile kanban-tile-v2 ${tileStyle.className} priority-accent-${task.priority}${task.isPinned ? " is-pinned" : ""}${task.status === "completed" ? " is-done" : ""}${isOverdue ? " is-overdue-card" : ""}`}
+                          className={`kanban-tile kanban-tile-v2 ${tileStyle.className} priority-accent-${task.priority}${task.isPinned ? " is-pinned" : ""}${task.status === "completed" ? " is-done" : ""}${isOverdue ? " is-overdue-card" : ""}${selectedIds.has(task.id) ? " is-selected" : ""}`}
                           style={{ ...tileStyle.style }}
                           draggable
                           onDragStart={(e) => {
@@ -654,9 +827,39 @@ export function KanbanView({
                             setDragTaskId(task.id);
                           }}
                           onDragEnd={() => setDragTaskId(null)}
+                          onPointerDown={(e) => handlePointerDown(e, task.id)}
+                          onPointerMove={handlePointerMove}
+                          onPointerUp={handlePointerUp}
                         >
                           {/* Card top row */}
                           <div className="kanban-tile-top">
+                            {/* Multi-select checkbox */}
+                            <button
+                              type="button"
+                              className="kanban-tile-select-btn"
+                              aria-label={selectedIds.has(task.id) ? "Deselect task" : "Select task"}
+                              onClick={(e) => { e.stopPropagation(); toggleSelect(task.id); }}
+                              title="Select task"
+                            >
+                              {selectedIds.has(task.id)
+                                ? <CheckCircle size={14} weight="fill" className="kanban-select-checked" />
+                                : <Circle size={14} className="kanban-select-unchecked" />}
+                            </button>
+                            {/* Quick-complete toggle */}
+                            <button
+                              type="button"
+                              className={`kanban-quick-complete${task.status === "completed" ? " is-done" : ""}`}
+                              aria-label={task.status === "completed" ? "Mark incomplete" : "Mark complete"}
+                              title={task.status === "completed" ? "Mark incomplete" : "Mark complete"}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onMoveTaskStatus(task.id, task.status === "completed" ? "open" : "completed");
+                              }}
+                            >
+                              {task.status === "completed"
+                                ? <CheckCircle size={16} weight="fill" />
+                                : <Circle size={16} />}
+                            </button>
                             <span className="kanban-drag-handle" aria-hidden="true" title="Drag to move">
                               <DotsSixVertical size={14} />
                             </span>

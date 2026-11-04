@@ -61,6 +61,7 @@ export function AgendaView({
 }: AgendaViewProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | "event" | "task" | "appointment">("all");
+  const [groupBy, setGroupBy] = useState<"date" | "project" | "priority">("date");
 
   // Filter by selected date, type filter, and search query
   // Holidays are excluded from the Agenda — they appear in the dedicated Holidays page
@@ -105,24 +106,43 @@ export function AgendaView({
     });
   }, [tasks, selectedDate, typeFilter, searchQuery]);
 
-  // Group filtered tasks by date for readable agenda sections
+  // Group filtered tasks — by date (default), project, or priority
   const groupedByDate = useMemo(() => {
+    if (groupBy === "project") {
+      const map = new Map<string, PlannerTask[]>();
+      for (const t of filteredTasks) {
+        const key = t.projectId || "__none";
+        const cur = map.get(key) || [];
+        cur.push(t);
+        map.set(key, cur);
+      }
+      return [...map.entries()].map(([dateKey, items]) => ({ dateKey, items }));
+    }
+    if (groupBy === "priority") {
+      const order = ["p1", "p2", "p3", "p4", "none"];
+      const map = new Map<string, PlannerTask[]>();
+      for (const t of filteredTasks) {
+        const key = t.priority || "none";
+        const cur = map.get(key) || [];
+        cur.push(t);
+        map.set(key, cur);
+      }
+      return order.filter((k) => map.has(k)).map((k) => ({ dateKey: k, items: map.get(k)! }));
+    }
+    // Default: group by date
     const groups: Array<{ dateKey: string; items: PlannerTask[] }> = [];
     const map = new Map<string, PlannerTask[]>();
-
     for (const t of filteredTasks) {
       if (!t.dueDate) continue;
-      const current = map.get(t.dueDate) || [];
-      current.push(t);
-      map.set(t.dueDate, current);
+      const cur = map.get(t.dueDate) || [];
+      cur.push(t);
+      map.set(t.dueDate, cur);
     }
-
     for (const [dateKey, items] of map.entries()) {
       groups.push({ dateKey, items });
     }
-
     return groups;
-  }, [filteredTasks]);
+  }, [filteredTasks, groupBy]);
 
   // Format date headers (e.g., "Today · Tuesday, Oct 27, 2026")
   const formatDateHeader = (dateKey: string): { title: string; isToday: boolean; isTomorrow: boolean } => {
@@ -248,6 +268,19 @@ export function AgendaView({
                 </button>
               ))}
             </div>
+            <div className="agenda-group-tabs" role="group" aria-label="Group by">
+              <span className="agenda-group-label">Group:</span>
+              {(["date", "project", "priority"] as const).map((g) => (
+                <button
+                  key={g}
+                  type="button"
+                  className={`agenda-type-tab ${groupBy === g ? "is-active" : ""}`}
+                  onClick={() => setGroupBy(g)}
+                >
+                  {g === "date" ? "Date" : g === "project" ? "Project" : "Priority"}
+                </button>
+              ))}
+            </div>
           </div>
         }
       />
@@ -255,12 +288,23 @@ export function AgendaView({
       {/* 2. Chronological Agenda List */}
       <div className="agenda-list agenda-workspace-list">
         {groupedByDate.map(({ dateKey, items }) => {
-          const { title, isToday } = formatDateHeader(dateKey);
+          let groupTitle = dateKey;
+          let isToday = false;
+          if (groupBy === "date") {
+            const header = formatDateHeader(dateKey);
+            groupTitle = header.title;
+            isToday = header.isToday;
+          } else if (groupBy === "project") {
+            groupTitle = dateKey === "__none" ? "No Project" : (items[0]?.googleCalendarName || dateKey);
+          } else if (groupBy === "priority") {
+            const pLabels: Record<string, string> = { p1: "🔴 Urgent", p2: "🟠 High", p3: "🔵 Medium", p4: "🟢 Low", none: "— No Priority" };
+            groupTitle = pLabels[dateKey] || dateKey;
+          }
 
           return (
             <div key={dateKey} className="agenda-date-group">
               <div className={`agenda-date-header ${isToday ? "is-today" : ""}`}>
-                <span className="agenda-date-header-title">{title}</span>
+                <span className="agenda-date-header-title">{groupTitle}</span>
                 <span className="agenda-date-header-count">
                   {items.length} item{items.length !== 1 ? "s" : ""}
                 </span>
