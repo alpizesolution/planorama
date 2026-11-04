@@ -8,6 +8,7 @@ import {
   Eye,
   EyeSlash,
   Lock,
+  PencilSimple,
   Plugs,
   PlugsConnected,
   Plus,
@@ -28,6 +29,7 @@ import {
   disconnectGoogleAccount,
   fetchGoogleCalendars,
   fetchGoogleIntegrationStatus,
+  renameGoogleAccount,
 } from "@/lib/google-calendar/sync-service";
 
 interface GoogleCalendarSettingsProps {
@@ -179,6 +181,41 @@ export function GoogleCalendarSettings({
       onError(msg);
     } finally {
       setIsDisconnecting(false);
+    }
+  }
+
+  async function handleRenameAccount(accountId: string, currentName?: string, email?: string) {
+    const promptMsg = `Custom display name for ${email || "this account"}:\n(Leave empty to reset to original Google account name)`;
+    const input = window.prompt(promptMsg, currentName || "");
+    if (input === null) return; // User cancelled
+    const trimmed = input.trim();
+    const finalName = trimmed.length > 0 ? trimmed : null;
+
+    try {
+      await renameGoogleAccount(accountId, finalName);
+      await loadStatus();
+
+      // Update calendarConfigs in preferences with accountCustomDisplayName
+      const nextConfigs = { ...syncSettings.calendarConfigs };
+      for (const [id, cfg] of Object.entries(nextConfigs)) {
+        if (cfg.accountId === accountId || cfg.accountEmail?.toLowerCase() === email?.toLowerCase()) {
+          nextConfigs[id] = {
+            ...cfg,
+            accountCustomDisplayName: finalName || undefined,
+          };
+        }
+      }
+      onSavePreferences({
+        ...preferences,
+        googleCalendarSync: {
+          ...syncSettings,
+          calendarConfigs: nextConfigs,
+        },
+      });
+      showToast(finalName ? `Account renamed to "${finalName}"` : "Account display name reset to original.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to rename account.";
+      onError(msg);
     }
   }
 
@@ -533,8 +570,18 @@ export function GoogleCalendarSettings({
                     </div>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                        <span style={{ fontSize: "12.5px", fontWeight: 700, color: "#1c1917", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {acc.userEmail}
+                        <span
+                          style={{
+                            fontSize: "12.5px",
+                            fontWeight: 700,
+                            color: "#1c1917",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                          title={acc.customDisplayName ? `${acc.customDisplayName} (${acc.userEmail})` : acc.userEmail}
+                        >
+                          {acc.customDisplayName || acc.userEmail}
                         </span>
                         {acc.isPrimary ? (
                           <span style={{ fontSize: "10px", background: "#fef08a", border: "1px solid #ca8a04", padding: "1px 6px", borderRadius: "999px", fontWeight: 800 }}>
@@ -546,28 +593,55 @@ export function GoogleCalendarSettings({
                           </span>
                         )}
                       </div>
+                      {acc.customDisplayName && (
+                        <div style={{ fontSize: "11px", color: "#78716c", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {acc.userEmail}
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => handleDisconnectAccount(acc.accountId, acc.userEmail)}
-                    disabled={isDisconnecting}
-                    style={{
-                      padding: "4px 8px",
-                      background: "#fee2e2",
-                      border: "1.5px solid #ef4444",
-                      borderRadius: "6px",
-                      fontSize: "11px",
-                      fontWeight: 700,
-                      color: "#991b1b",
-                      cursor: "pointer",
-                      flexShrink: 0,
-                    }}
-                    title={`Disconnect ${acc.userEmail}`}
-                  >
-                    Disconnect
-                  </button>
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
+                    <button
+                      type="button"
+                      onClick={() => handleRenameAccount(acc.accountId, acc.customDisplayName, acc.userEmail)}
+                      style={{
+                        padding: "4px 8px",
+                        background: "#fff",
+                        border: "1.5px solid #1c1917",
+                        borderRadius: "6px",
+                        fontSize: "11px",
+                        fontWeight: 700,
+                        color: "#1c1917",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "4px",
+                      }}
+                      title={`Rename ${acc.customDisplayName || acc.userEmail}`}
+                    >
+                      <PencilSimple size={12} weight="bold" />
+                      <span>Rename</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDisconnectAccount(acc.accountId, acc.userEmail)}
+                      disabled={isDisconnecting}
+                      style={{
+                        padding: "4px 8px",
+                        background: "#fee2e2",
+                        border: "1.5px solid #ef4444",
+                        borderRadius: "6px",
+                        fontSize: "11px",
+                        fontWeight: 700,
+                        color: "#991b1b",
+                        cursor: "pointer",
+                      }}
+                      title={`Disconnect ${acc.userEmail}`}
+                    >
+                      Disconnect
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

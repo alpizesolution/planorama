@@ -2,6 +2,7 @@ import { cookies, headers } from "next/headers";
 import crypto from "node:crypto";
 import { signString, verifySignature } from "./crypto";
 import { verifyFirebaseIdToken, type VerifiedFirebaseUser } from "./firebase-verify";
+import { migrateSessionOwnership } from "./google-token-store";
 
 export const SIGNED_SESSION_COOKIE_NAME = "planorama_session";
 export const LEGACY_SESSION_COOKIE_NAME = "planorama_session_id";
@@ -270,7 +271,6 @@ export async function bindSessionToFirebaseUser(idToken: string): Promise<Sessio
   // If previous guest session had connected Google accounts, migrate them to the Firebase UID
   if (previousSessionId && previousSessionId !== effectiveSessionId) {
     try {
-      const { migrateSessionOwnership } = await import("./google-token-store");
       await migrateSessionOwnership(previousSessionId, upgradedSession.userId);
     } catch (err) {
       console.warn("[Session] Non-fatal: guest token migration failed:", err);

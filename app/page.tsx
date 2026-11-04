@@ -11,6 +11,16 @@ import {
   CaretDown,
   Gear,
 } from "@phosphor-icons/react";
+import {
+  LayoutDashboard,
+  Calendar as CalendarIcon,
+  Kanban as KanbanIcon,
+  ListFilter,
+  MoreHorizontal,
+  Sliders,
+  Settings as SettingsIcon,
+  CalendarClock as CalendarClockIcon,
+} from "lucide-react";
 import { createTask, getTasks, removeTask, updateTask } from "@/lib/schedule/task-service";
 import type { PlannerTask, PlannerPreferences } from "@/lib/schedule/types";
 import { validateTask } from "@/lib/schedule/validation";
@@ -31,6 +41,7 @@ import {
   resolveDashboardWidgets,
 } from "@/lib/dashboard/types";
 import { CalendarWorkspaceShell } from "@/app/components/calendar/calendar-workspace-shell";
+import { CalendarWorkspaceHeader } from "@/app/components/calendar/calendar-workspace-header";
 import { DayView } from "@/app/components/calendar/day-view";
 import { MonthView } from "@/app/components/calendar/month-view";
 import { WeekView } from "@/app/components/calendar/week-view";
@@ -40,6 +51,8 @@ import { UserProfileButton } from "@/app/components/auth/user-profile-button";
 import {
   executeTwoWaySync,
   fetchGoogleIntegrationStatus,
+  renameGoogleAccount,
+  renameGoogleCalendar,
 } from "@/lib/google-calendar/sync-service";
 import {
   enqueueSyncAction,
@@ -66,10 +79,19 @@ import {
   DEFAULT_ITEM_STYLES,
   resolveItemStylesPreferences,
 } from "@/lib/calendar/item-color";
+import { isTaskItem, sanitizePlannerTasks } from "@/lib/calendar/item-classifier";
+import { KanbanView } from "@/app/components/kanban/kanban-view";
 import {
   SettingsWorkspace,
   type SettingsSectionId,
 } from "@/app/components/settings/settings-workspace";
+import {
+  type AppView,
+  DEFAULT_VIEW,
+  NAV_VIEWS,
+  resolveViewFromUrl,
+  buildViewRelativeUrl,
+} from "@/lib/calendar/view-routing";
 import {
   TASK_OPTIONS,
   getOptionLabel,
@@ -82,19 +104,7 @@ import {
 type TaskTemplate = { id: string; name: string; title: string; notes: string; priority: PlannerTask["priority"]; recurrence: PlannerTask["recurrence"] };
 export type TaskLabel = { id: string; name: string };
 type TaskProject = { id: string; name: string };
-type AppView = "dashboard" | "day" | "month" | "year" | "yearline" | "agenda" | "week" | "workWeek" | "kanban" | "settings";
-
-const NAV_VIEWS: { id: AppView; label: string }[] = [
-  { id: "dashboard", label: "Dashboard" },
-  { id: "day", label: "Day" },
-  { id: "week", label: "Week" },
-  { id: "workWeek", label: "Work Weeks" },
-  { id: "month", label: "Month" },
-  { id: "year", label: "Year" },
-  { id: "yearline", label: "Yearline" },
-  { id: "agenda", label: "Agenda" },
-  { id: "kanban", label: "Board" },
-];
+export type { AppView };
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -311,7 +321,7 @@ export default function HomePage() {
   const [editRecurrence, setEditRecurrence] = useState<PlannerTask["recurrence"]>("none");
   const [editStatus, setEditStatus] = useState<PlannerTask["status"]>("open");
   const [monthOffset, setMonthOffset] = useState(0);
-  const [view, setView] = useState<AppView>("month");
+  const [view, setView] = useState<AppView>(DEFAULT_VIEW);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [taskFilter, setTaskFilter] = useState<"all" | "open" | "completed">("all");
   const [taskSearch, setTaskSearch] = useState("");
@@ -346,7 +356,20 @@ export default function HomePage() {
   const [projectFilter, setProjectFilter] = useState("");
   const [calendarFilter, setCalendarFilter] = useState("");
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>("general");
-  const [previousView, setPreviousView] = useState<AppView>("month");
+  const [previousView, setPreviousView] = useState<AppView>(DEFAULT_VIEW);
+
+  const syncViewUrl = useCallback((nextView: AppView, nextSection?: SettingsSectionId) => {
+    if (typeof window === "undefined") return;
+    const nextRelativeUrl = buildViewRelativeUrl(nextView, {
+      section: nextSection,
+      currentSearch: window.location.search,
+      pathname: window.location.pathname,
+    });
+    const currentRelativeUrl = window.location.pathname + window.location.search + window.location.hash;
+    if (nextRelativeUrl !== currentRelativeUrl) {
+      window.history.pushState({}, "", nextRelativeUrl);
+    }
+  }, []);
 
   const openSettings = useCallback((section: SettingsSectionId = "general") => {
     setView((curr) => {
@@ -356,7 +379,8 @@ export default function HomePage() {
       return "settings";
     });
     setSettingsSection(section);
-  }, []);
+    syncViewUrl("settings", section);
+  }, [syncViewUrl]);
 
   // Year view state
   const [yearOffset, setYearOffset] = useState(0);
@@ -444,6 +468,7 @@ export default function HomePage() {
   const [googleStatus, setGoogleStatus] = useState<GoogleIntegrationStatus | null>(null);
   const [localCalendarEnabled, setLocalCalendarEnabled] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
 
   // Toggle sidebar function that persists preference on desktop/tablet
   const handleToggleSidebar = () => {
@@ -619,7 +644,7 @@ export default function HomePage() {
     return (a.dueDate ?? "9999").localeCompare(b.dueDate ?? "9999") || a.createdAt.localeCompare(b.createdAt);
   });
 
-  const isOverdue = (task: PlannerTask) => task.status !== "completed" && Boolean(task.dueDate && task.dueDate < todayKey);
+  const isOverdue = (task: PlannerTask) => isTaskItem(task) && task.status !== "completed" && Boolean(task.dueDate && task.dueDate < todayKey);
   const nextOccurrenceDate = (dateKey: string, recurrence: PlannerTask["recurrence"]) => {
     const [year, month, day] = dateKey.split("-").map(Number);
     const date = new Date(Date.UTC(year, month - 1, day));
@@ -682,7 +707,20 @@ export default function HomePage() {
       const savedTemplates = window.localStorage.getItem(TEMPLATE_STORAGE_KEY);
       if (savedTemplates) setTaskTemplates(JSON.parse(savedTemplates));
     } catch { if (active) setSaveError("Could not load saved organization data on this device."); }
-    getTasks().then((saved) => { if (active) setTasks(saved); })
+    getTasks().then(async (saved) => {
+      if (active) {
+        const { sanitized, correctedCount } = sanitizePlannerTasks(
+          saved,
+          preferences.googleCalendarSync?.calendarConfigs
+        );
+        if (correctedCount > 0) {
+          for (const item of sanitized) {
+            await updateTask(item).catch(() => {});
+          }
+        }
+        setTasks(sanitized);
+      }
+    })
       .catch(() => { if (active) setSaveError("Could not load saved tasks on this device."); })
       .finally(() => { if (active) setLoaded(true); });
     void refreshHabits();
@@ -774,6 +812,85 @@ export default function HomePage() {
     }
   }, [preferences, googleStatus]);
 
+  const handleRenameAccount = useCallback(async (accountId: string, newName: string | null) => {
+    try {
+      await renameGoogleAccount(accountId, newName);
+      setGoogleStatus((prev) => {
+        if (!prev) return prev;
+        const nextAccounts = (prev.accounts || []).map((acc) => {
+          if (acc.accountId === accountId || acc.userEmail.toLowerCase() === accountId.toLowerCase()) {
+            return {
+              ...acc,
+              customDisplayName: newName?.trim() || undefined,
+            };
+          }
+          return acc;
+        });
+        return {
+          ...prev,
+          accounts: nextAccounts,
+        };
+      });
+
+      // Also update calendarConfigs with accountCustomDisplayName so that all views update immediately
+      const currentSync = preferences.googleCalendarSync || DEFAULT_GOOGLE_SYNC_SETTINGS;
+      const nextConfigs = { ...currentSync.calendarConfigs };
+      let changed = false;
+      for (const [id, cfg] of Object.entries(nextConfigs)) {
+        if (cfg.accountId === accountId || cfg.accountEmail?.toLowerCase() === accountId.toLowerCase()) {
+          nextConfigs[id] = {
+            ...cfg,
+            accountCustomDisplayName: newName?.trim() || undefined,
+          };
+          changed = true;
+        }
+      }
+      if (changed) {
+        savePreferences({
+          ...preferences,
+          googleCalendarSync: {
+            ...currentSync,
+            calendarConfigs: nextConfigs,
+          },
+        });
+      }
+      showToast(newName?.trim() ? `Account renamed to "${newName.trim()}"` : "Account display name reset to original.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to rename account.";
+      showToast(`Error: ${msg}`);
+      throw err;
+    }
+  }, [preferences, showToast]);
+
+  const handleRenameCalendar = useCallback(async (calendarId: string, newName: string | null) => {
+    try {
+      await renameGoogleCalendar(calendarId, newName);
+      const currentSync = preferences.googleCalendarSync || DEFAULT_GOOGLE_SYNC_SETTINGS;
+      const currentConfig = currentSync.calendarConfigs[calendarId];
+      if (currentConfig) {
+        const nextConfigs = {
+          ...currentSync.calendarConfigs,
+          [calendarId]: {
+            ...currentConfig,
+            customDisplayName: newName?.trim() || undefined,
+          },
+        };
+        savePreferences({
+          ...preferences,
+          googleCalendarSync: {
+            ...currentSync,
+            calendarConfigs: nextConfigs,
+          },
+        });
+      }
+      showToast(newName?.trim() ? `Calendar renamed to "${newName.trim()}"` : "Calendar display name reset to original.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to rename calendar.";
+      showToast(`Error: ${msg}`);
+      throw err;
+    }
+  }, [preferences, showToast]);
+
   const handleConnectGoogle = useCallback(() => {
     const returnUrl = typeof window !== "undefined" ? window.location.pathname + window.location.search : "/";
     window.location.href = `/api/auth/google?returnUrl=${encodeURIComponent(returnUrl)}`;
@@ -830,17 +947,29 @@ export default function HomePage() {
     }
   }, [preferences, tasks, showToast, refreshGoogleStatus]);
 
-  // Check for Google OAuth callback parameters in URL
+  // Listen for browser back/forward navigation (popstate)
+  useEffect(() => {
+    function handlePopState() {
+      const { view: targetView, section: targetSection } = resolveViewFromUrl(window.location.search);
+      setView(targetView);
+      if (targetSection) {
+        setSettingsSection(targetSection);
+      }
+    }
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  // Check for Google OAuth callback parameters in URL and initial view resolution
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
-    const viewParam = params.get("view") as AppView | null;
-    const sectionParam = params.get("section") as SettingsSectionId | null;
-    if (viewParam && (NAV_VIEWS.some((v) => v.id === viewParam) || viewParam === "settings")) {
-      setView(viewParam);
-    }
-    if (sectionParam) {
-      setSettingsSection(sectionParam);
+    const { view: targetView, section: targetSection } = resolveViewFromUrl(params);
+    if (params.has("view") || params.has("section")) {
+      setView(targetView);
+      if (targetSection) {
+        setSettingsSection(targetSection);
+      }
     }
     const gcalStatus = params.get("gcal_status");
     const gcalError = params.get("gcal_error");
@@ -1639,20 +1768,7 @@ export default function HomePage() {
     }
   }
 
-  // Kanban helpers
-  const kanbanColumns: { key: PlannerTask["status"]; label: string }[] = [
-    { key: "open", label: "To Do" },
-    { key: "in_progress", label: "In Progress" },
-    { key: "completed", label: "Done" },
-  ];
-  const tasksByStatus = useMemo(() => {
-    const map: Record<PlannerTask["status"], PlannerTask[]> = { open: [], in_progress: [], completed: [] };
-    for (const task of displayedTasks) {
-      if (map[task.status]) map[task.status].push(task);
-      else map.open.push(task); // fallback
-    }
-    return map;
-  }, [displayedTasks]);
+
 
   // Detail task lookup
   const detailTask = detailTaskId ? tasks.find((t) => t.id === detailTaskId) : null;
@@ -1675,13 +1791,20 @@ export default function HomePage() {
 
     return (
       <section className="yearline-unified-card neo-card" id="yearline-view">
-        <div className="card-header">
-          <div>
-            <span className="section-kicker">UNIFIED ANNUAL PLANNER · ALL 12 MONTHS</span>
-            <h2>{shownYear} Yearline</h2>
-          </div>
-          <div className="calendar-actions">
-            <div className="yearline-nav-controls">
+        <CalendarWorkspaceHeader
+          kicker="UNIFIED ANNUAL PLANNER · ALL 12 MONTHS"
+          title={`${shownYear} Yearline`}
+          compactTitle={`${shownYear} Yearline`}
+          isToday={shownYear === today.getFullYear()}
+          todayTagLabel="This Year"
+          todayButtonLabel="This Year"
+          onPrevious={() => handleYearChange(-1)}
+          previousLabel="Previous year"
+          onToday={() => handleYearChange("current")}
+          onNext={() => handleYearChange(1)}
+          nextLabel="Next year"
+          extraControls={
+            <div className="yearline-nav-controls" role="group" aria-label="Horizontal scroll controls">
               <button
                 type="button"
                 className="yearline-scroll-btn"
@@ -1701,11 +1824,8 @@ export default function HomePage() {
                 ▶
               </button>
             </div>
-            <button type="button" className="icon-button" aria-label="Previous year" onClick={() => handleYearChange(-1)}>←</button>
-            <button type="button" className="icon-button today-btn" onClick={() => handleYearChange("current")}>This Year</button>
-            <button type="button" className="icon-button" aria-label="Next year" onClick={() => handleYearChange(1)}>→</button>
-          </div>
-        </div>
+          }
+        />
 
         <div className="yearline-summary-bar">
           <div className="yearline-stats">
@@ -1779,7 +1899,24 @@ export default function HomePage() {
                     style={{
                       backgroundColor: color.bg,
                       borderBottomColor: color.border,
+                      cursor: "pointer",
                     }}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => {
+                      setMonthOffset(mIdx - today.getMonth() + (shownYear - today.getFullYear()) * 12);
+                      setView("month");
+                      syncViewUrl("month");
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setMonthOffset(mIdx - today.getMonth() + (shownYear - today.getFullYear()) * 12);
+                        setView("month");
+                        syncViewUrl("month");
+                      }
+                    }}
+                    title={`Open ${MONTH_NAMES[mIdx]} in Month View`}
                   >
                     <div className="yearline-month-header-content">
                       <div className="yearline-month-title-wrap">
@@ -2227,7 +2364,16 @@ export default function HomePage() {
     <header className="sticky-header" id="app-sticky-header">
       <div className="sticky-header-inner">
         <div className="brand-group">
-          <a className="brand" href="#" aria-label="Planorama home">
+          <a
+            className="brand"
+            href="#"
+            aria-label="Planorama home"
+            onClick={(e) => {
+              e.preventDefault();
+              setView(DEFAULT_VIEW);
+              syncViewUrl(DEFAULT_VIEW);
+            }}
+          >
             <span className="brand-mark">
               <CalendarBlank size={22} weight="fill" />
             </span>
@@ -2254,6 +2400,7 @@ export default function HomePage() {
                   className={isActive ? "vs-active" : ""}
                   onClick={() => {
                     setView(v.id);
+                    syncViewUrl(v.id);
                   }}
                 >
                   {v.label}
@@ -2264,6 +2411,19 @@ export default function HomePage() {
         </div>
 
         <div className="topbar-actions">
+          <button
+            type="button"
+            className="mobile-header-sidebar-btn"
+            onClick={() => setSidebarOpen((prev) => !prev)}
+            aria-label={sidebarOpen ? "Close calendars drawer" : "Open calendars drawer"}
+            title="Calendars & Accounts"
+          >
+            <CalendarBlank size={17} weight="bold" />
+            <span className="mobile-header-sidebar-btn-label">Calendars</span>
+            {activeCalendarCount > 0 && (
+              <span className="mobile-header-sidebar-badge">{activeCalendarCount}</span>
+            )}
+          </button>
           <UserProfileButton
             onOpenPreferences={() => openSettings("general")}
             showToast={showToast}
@@ -2273,7 +2433,9 @@ export default function HomePage() {
             className={`header-preferences-btn ${view === "settings" ? "is-active" : ""}`}
             onClick={() => {
               if (view === "settings") {
-                setView(previousView || "month");
+                const targetView = previousView || DEFAULT_VIEW;
+                setView(targetView);
+                syncViewUrl(targetView);
               } else {
                 openSettings(settingsSection);
               }
@@ -2328,8 +2490,15 @@ export default function HomePage() {
         {view === "settings" ? (
           <SettingsWorkspace
             activeSection={settingsSection}
-            onSelectSection={setSettingsSection}
-            onReturnToPlanner={() => setView(previousView || "month")}
+            onSelectSection={(sec) => {
+              setSettingsSection(sec);
+              syncViewUrl("settings", sec);
+            }}
+            onReturnToPlanner={() => {
+              const targetView = previousView || DEFAULT_VIEW;
+              setView(targetView);
+              syncViewUrl(targetView);
+            }}
             preferences={preferences}
             onSavePreferences={savePreferences}
             labels={labels}
@@ -2389,6 +2558,8 @@ export default function HomePage() {
               onConnectGoogle: handleConnectGoogle,
               onSyncGoogle: handleSyncGoogle,
               isSyncingGoogle,
+              onRenameAccount: handleRenameAccount,
+              onRenameCalendar: handleRenameCalendar,
               isOpenOnMobile: sidebarOpen,
               onCloseMobile: () => setSidebarOpen(false),
               isCollapsed: !sidebarOpen,
@@ -2416,7 +2587,10 @@ export default function HomePage() {
                 onToggleTask={(task) => void toggleTask(task)}
                 onEditTask={(task) => openTaskDetail(task)}
                 onDeleteTask={(task) => void deleteTask(task)}
-                onViewCalendar={() => setView("month")}
+                onViewCalendar={() => {
+                  setView("month");
+                  syncViewUrl("month");
+                }}
                 onOpenPreferences={() => openSettings("dashboard")}
               onRestoreWidgets={() => {
                 savePreferences({
@@ -2459,6 +2633,11 @@ export default function HomePage() {
                 todayKey={todayKey}
                 selectedDate={selectedDate}
                 onSelectDate={handleSelectYearDate}
+                onSelectMonth={(monthIdx) => {
+                  setMonthOffset(monthIdx - today.getMonth() + (shownYear - today.getFullYear()) * 12);
+                  setView("month");
+                  syncViewUrl("month");
+                }}
                 onClearSelectedDate={() => setSelectedDate(null)}
                 onYearChange={handleYearChange}
                 weekStartsOn={preferences.weekStartsOn}
@@ -2528,119 +2707,28 @@ export default function HomePage() {
 
           {/* ===== KANBAN VIEW ===== */}
           {view === "kanban" && (
-            <section className="kanban-board neo-card" id="kanban-view">
-              <div className="card-header">
-                <div>
-                  <span className="section-kicker">TASK BOARD</span>
-                  <h2>Kanban<span className="heading-period">.</span></h2>
-                </div>
-              </div>
-              <div className="kanban-columns">
-                {kanbanColumns.map((col) => {
-                  const colTasks = tasksByStatus[col.key];
-                  return (
-                    <div
-                      className={`kanban-col kanban-col-${col.key}`}
-                      key={col.key}
-                      onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add("kanban-drag-over"); }}
-                      onDragLeave={(e) => { e.currentTarget.classList.remove("kanban-drag-over"); }}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        e.currentTarget.classList.remove("kanban-drag-over");
-                        const taskId = e.dataTransfer.getData("text/plain") || dragTaskId;
-                        if (taskId) void moveTaskToStatus(taskId, col.key);
-                        setDragTaskId(null);
-                      }}
-                    >
-                      <div className="kanban-col-header">
-                        <div className="kanban-col-header-left">
-                          <span className={`kanban-status-dot kanban-dot-${col.key}`} />
-                          <span className="kanban-col-title">{col.label}</span>
-                        </div>
-                        <div className="kanban-col-header-actions">
-                          <span className="kanban-col-count">{colTasks.length}</span>
-                          <button
-                            type="button"
-                            className="kanban-col-add-btn"
-                            aria-label={`Add task to ${col.label}`}
-                            title={`Add task to ${col.label}`}
-                            onClick={() => openAddTask({ date: selectedDate || todayKey, status: col.key })}
-                          >
-                            <Plus size={13} weight="bold" />
-                          </button>
-                        </div>
-                      </div>
-                      <div className="kanban-col-body">
-                        {colTasks.length === 0 && (
-                          <div className="kanban-empty">
-                            {col.key === "open" ? "Add a task to get started" : col.key === "in_progress" ? "Drag tasks here when you start working" : "Completed tasks show up here"}
-                          </div>
-                        )}
-                        {colTasks.map((task) => {
-                          const tileStyle = getItemTileStyle(task, preferences.itemStyles, activeCalendarConfigs);
-                          const iType = getItemType(task);
-                          const isAppt = iType === "appointment";
-                          const isEvt = iType === "event";
-                          return (
-                            <div
-                              className={`kanban-tile ${tileStyle.className} priority-accent-${task.priority} ${task.isPinned ? "is-pinned" : ""}`}
-                              key={task.id}
-                              style={{ ...tileStyle.style }}
-                              draggable
-                              onDragStart={(e) => {
-                                e.dataTransfer.setData("text/plain", task.id);
-                                setDragTaskId(task.id);
-                              }}
-                              onDragEnd={() => setDragTaskId(null)}
-                            >
-                              <div className="kanban-tile-top">
-                                <span className="kanban-drag-handle" aria-hidden="true"><DotsSixVertical size={14} /></span>
-                                {task.isPinned && <span className="kanban-pin-badge" title="Pinned: Keep this task easy to find">📌</span>}
-                                <button type="button" className="kanban-tile-title" onClick={() => openTaskDetail(task)}>{task.title}</button>
-                              </div>
-                              <div className="kanban-tile-meta">
-                                <div className="kanban-badges-group">
-                                  {isAppt && <span className="badge-chip" style={{ backgroundColor: "#fef3c7", color: "#92400e", border: "1px solid #fde68a" }}>⏱️ Schedule</span>}
-                                  {isEvt && <span className="badge-chip" style={{ backgroundColor: "#e0f2fe", color: "#0369a1", border: "1px solid #bae6fd" }}>📅 Event</span>}
-                                  {task.isPersonal && <span className="badge-chip badge-personal" title="Personal: Optional category for life tasks">🌿 Personal</span>}
-                                  {task.timingPreference === "whenever" && <span className="badge-chip badge-whenever" title="Whenever: No specific deadline">🟢 Whenever</span>}
-                                  {task.labelIds && task.labelIds.length > 0 && task.labelIds.map((id) => {
-                                    const labelObj = labels.find((l) => l.id === id);
-                                    return labelObj ? (
-                                      <span key={id} className="task-label-chip">🏷️ {labelObj.name}</span>
-                                    ) : null;
-                                  })}
-                                  <span className={`priority-badge-sm priority-${task.priority}`}>{priorityEmoji(task.priority)} {priorityLabel(task.priority)}</span>
-                                </div>
-                                {task.dueDate && <span className={`kanban-due ${isOverdue(task) ? "overdue" : ""}`}>{isOverdue(task) ? "Overdue · " : ""}{new Date(task.dueDate + "T12:00:00").toLocaleDateString("en", { month: "short", day: "numeric" })}</span>}
-                              </div>
-                              {/* Touch-friendly status selector */}
-                              <div className="kanban-tile-touch-move">
-                                <label className="kanban-move-label" aria-label={`Move ${task.title}`}>
-                                  <CaretDown size={12} />
-                                  <select value={task.status} onChange={(e) => void moveTaskToStatus(task.id, e.target.value as PlannerTask["status"])}>
-                                    <option value="open">To Do</option>
-                                    <option value="in_progress">In Progress</option>
-                                    <option value="completed">Done</option>
-                                  </select>
-                                </label>
-                              </div>
-                            </div>
-                          );
-                        })}
-                        <button
-                          type="button"
-                          className="kanban-col-add-bottom-btn"
-                          onClick={() => openAddTask({ date: selectedDate || todayKey, status: col.key })}
-                        >
-                          + Add task
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
+            <KanbanView
+              tasks={displayedTasks}
+              today={today}
+              todayKey={todayKey}
+              weekStartsOn={preferences.weekStartsOn}
+              projects={projects}
+              labels={labels}
+              onOpenTaskDetail={openTaskDetail}
+              onAddTask={(opts) =>
+                openAddTask({
+                  date: opts?.date || todayKey,
+                  status: opts?.status || "open",
+                  time: opts?.time,
+                })
+              }
+              onMoveTaskStatus={(taskId, newStatus) => void moveTaskToStatus(taskId, newStatus)}
+              priorityLabel={(p) => priorityLabel(p, preferences)}
+              priorityEmoji={(p) => priorityEmoji(p, preferences)}
+              itemStyles={preferences.itemStyles ?? DEFAULT_ITEM_STYLES}
+              allCalendarConfigs={activeCalendarConfigs}
+              initialProjectFilter={projectFilter}
+            />
           )}
 
           {/* ===== GOOGLE CALENDAR-STYLE MONTH WORKSPACE ===== */}
@@ -2892,5 +2980,266 @@ export default function HomePage() {
 
       <footer className="page-footer"><span>MADE FOR YOUR MANY PLANS</span><span>Planorama <b>✳</b> A little more organized, a lot more you.</span></footer>
     </section>
+
+    {/* ===== MOBILE BOTTOM NAVIGATION BAR (< 768px) ===== */}
+    <nav className="mobile-bottom-nav" aria-label="Mobile Navigation">
+      <button
+        type="button"
+        className={`mobile-nav-item ${view === "dashboard" ? "is-active" : ""}`}
+        onClick={() => {
+          setView("dashboard");
+          syncViewUrl("dashboard");
+          setIsMoreMenuOpen(false);
+        }}
+        aria-label="Dashboard"
+      >
+        <LayoutDashboard size={20} strokeWidth={view === "dashboard" ? 2.5 : 2} />
+        <span>Dashboard</span>
+      </button>
+
+      <button
+        type="button"
+        className={`mobile-nav-item ${["month", "week", "workWeek", "day", "year", "yearline"].includes(view) ? "is-active" : ""}`}
+        onClick={() => {
+          const target = ["month", "week", "workWeek", "day", "year", "yearline"].includes(view) ? view : "month";
+          setView(target);
+          syncViewUrl(target);
+          setIsMoreMenuOpen(false);
+        }}
+        aria-label="Calendar"
+      >
+        <CalendarIcon size={20} strokeWidth={["month", "week", "workWeek", "day", "year", "yearline"].includes(view) ? 2.5 : 2} />
+        <span>Calendar</span>
+      </button>
+
+      <button
+        type="button"
+        className="mobile-nav-add-btn"
+        onClick={() => {
+          openAddTask({
+            date: selectedDate || (view === "week" || view === "workWeek" ? toDateKey(weeklyAnchorDate) : todayKey),
+          });
+          setIsMoreMenuOpen(false);
+        }}
+        aria-label="Create new event, task or appointment"
+        title="Create"
+      >
+        <Plus size={24} weight="bold" />
+      </button>
+
+      <button
+        type="button"
+        className={`mobile-nav-item ${view === "kanban" ? "is-active" : ""}`}
+        onClick={() => {
+          setView("kanban");
+          syncViewUrl("kanban");
+          setIsMoreMenuOpen(false);
+        }}
+        aria-label="Tasks Board"
+      >
+        <KanbanIcon size={20} strokeWidth={view === "kanban" ? 2.5 : 2} />
+        <span>Tasks</span>
+      </button>
+
+      <button
+        type="button"
+        className={`mobile-nav-item ${isMoreMenuOpen || ["agenda", "settings"].includes(view) ? "is-active" : ""}`}
+        onClick={() => setIsMoreMenuOpen((prev) => !prev)}
+        aria-label="More views and options"
+        aria-expanded={isMoreMenuOpen}
+      >
+        <MoreHorizontal size={20} strokeWidth={isMoreMenuOpen ? 2.5 : 2} />
+        <span>More</span>
+      </button>
+    </nav>
+
+    {/* ===== MOBILE MORE VIEWS SHEET ===== */}
+    {isMoreMenuOpen && (
+      <div className="mobile-more-backdrop" onClick={() => setIsMoreMenuOpen(false)}>
+        <div
+          className="mobile-more-sheet neo-card"
+          onClick={(e) => e.stopPropagation()}
+          role="dialog"
+          aria-label="More Views and Tools"
+        >
+          <div className="mobile-more-sheet-header">
+            <div className="mobile-more-sheet-title">
+              <span className="sheet-kicker">ALL WORKSPACES & TOOLS</span>
+              <h3>More Options</h3>
+            </div>
+            <button
+              type="button"
+              className="mobile-more-close-btn"
+              onClick={() => setIsMoreMenuOpen(false)}
+              aria-label="Close menu"
+            >
+              <X size={18} weight="bold" />
+            </button>
+          </div>
+
+          <div className="mobile-more-grid">
+            <button
+              type="button"
+              className={`mobile-more-card ${view === "day" ? "is-selected" : ""}`}
+              onClick={() => {
+                setView("day");
+                syncViewUrl("day");
+                setIsMoreMenuOpen(false);
+              }}
+            >
+              <span className="more-card-icon" style={{ background: "var(--yellow)" }}>
+                <CalendarClockIcon size={20} />
+              </span>
+              <div className="more-card-info">
+                <strong>Day Schedule</strong>
+                <small>Single day hourly timeline</small>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className={`mobile-more-card ${view === "week" ? "is-selected" : ""}`}
+              onClick={() => {
+                setView("week");
+                syncViewUrl("week");
+                setIsMoreMenuOpen(false);
+              }}
+            >
+              <span className="more-card-icon" style={{ background: "var(--lime)" }}>
+                <CalendarIcon size={20} />
+              </span>
+              <div className="more-card-info">
+                <strong>Week Timeline</strong>
+                <small>7-day weekly schedule</small>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className={`mobile-more-card ${view === "workWeek" ? "is-selected" : ""}`}
+              onClick={() => {
+                setView("workWeek");
+                syncViewUrl("workWeek");
+                setIsMoreMenuOpen(false);
+              }}
+            >
+              <span className="more-card-icon" style={{ background: "var(--sky)" }}>
+                <CalendarIcon size={20} />
+              </span>
+              <div className="more-card-info">
+                <strong>Work Weeks</strong>
+                <small>Monday–Friday workspace</small>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className={`mobile-more-card ${view === "month" ? "is-selected" : ""}`}
+              onClick={() => {
+                setView("month");
+                syncViewUrl("month");
+                setIsMoreMenuOpen(false);
+              }}
+            >
+              <span className="more-card-icon" style={{ background: "var(--yellow)" }}>
+                <CalendarIcon size={20} />
+              </span>
+              <div className="more-card-info">
+                <strong>Month Grid</strong>
+                <small>Full monthly calendar</small>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className={`mobile-more-card ${view === "agenda" ? "is-selected" : ""}`}
+              onClick={() => {
+                setView("agenda");
+                syncViewUrl("agenda");
+                setIsMoreMenuOpen(false);
+              }}
+            >
+              <span className="more-card-icon" style={{ background: "var(--purple)" }}>
+                <ListFilter size={20} />
+              </span>
+              <div className="more-card-info">
+                <strong>Agenda</strong>
+                <small>Chronological schedule list</small>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className={`mobile-more-card ${view === "year" ? "is-selected" : ""}`}
+              onClick={() => {
+                setView("year");
+                syncViewUrl("year");
+                setIsMoreMenuOpen(false);
+              }}
+            >
+              <span className="more-card-icon" style={{ background: "var(--pink)" }}>
+                <CalendarIcon size={20} />
+              </span>
+              <div className="more-card-info">
+                <strong>Year Overview</strong>
+                <small>Annual 12-month calendar</small>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className={`mobile-more-card ${view === "yearline" ? "is-selected" : ""}`}
+              onClick={() => {
+                setView("yearline");
+                syncViewUrl("yearline");
+                setIsMoreMenuOpen(false);
+              }}
+            >
+              <span className="more-card-icon" style={{ background: "var(--orange)" }}>
+                <CalendarIcon size={20} />
+              </span>
+              <div className="more-card-info">
+                <strong>Yearline</strong>
+                <small>Horizontal annual strip</small>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className="mobile-more-card"
+              onClick={() => {
+                setSidebarOpen(true);
+                setIsMoreMenuOpen(false);
+              }}
+            >
+              <span className="more-card-icon" style={{ background: "#fef3c7" }}>
+                <Sliders size={20} />
+              </span>
+              <div className="more-card-info">
+                <strong>Calendars & Accounts</strong>
+                <small>Google sync and client calendars</small>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className={`mobile-more-card ${view === "settings" ? "is-selected" : ""}`}
+              onClick={() => {
+                openSettings("general");
+                setIsMoreMenuOpen(false);
+              }}
+            >
+              <span className="more-card-icon" style={{ background: "#e2e8f0" }}>
+                <SettingsIcon size={20} />
+              </span>
+              <div className="more-card-info">
+                <strong>Preferences</strong>
+                <small>Themes, sync & settings</small>
+              </div>
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
   </main>;
 }

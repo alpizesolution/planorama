@@ -51,6 +51,9 @@ import type { DashboardWidgetId } from "@/lib/dashboard/types";
 import {
   DASHBOARD_WIDGET_METADATA,
   DEFAULT_DASHBOARD_WIDGETS,
+  WIDGET_WIDTH_LABELS,
+  WIDGET_HEIGHT_LABELS,
+  getWidgetColumnSpan,
   resolveDashboardWidgets,
 } from "@/lib/dashboard/types";
 import type { TaskLabel } from "@/app/page";
@@ -943,68 +946,88 @@ export function SettingsWorkspace({
                   <div className="dashboard-widget-list" role="list" aria-label="Dashboard widgets order and visibility">
                     {currentWidgets.map((widget, index) => {
                       const meta = DASHBOARD_WIDGET_METADATA[widget.id];
+                      const width = widget.width || meta.defaultWidth;
+                      const height = widget.height || meta.defaultHeight;
                       return (
                         <div
                           key={widget.id}
                           className={`dashboard-widget-item-row ${widget.visible ? "is-visible" : "is-hidden"}`}
                           role="listitem"
                         >
-                          <div className="dashboard-widget-reorder-btns">
-                            <button
-                              type="button"
-                              className="widget-move-btn"
-                              disabled={index === 0}
-                              onClick={() => handleMoveWidget(index, "up")}
-                              aria-label={`Move ${meta.name} up`}
-                              title="Move up"
-                            >
-                              <CaretUp size={14} weight="bold" />
-                            </button>
-                            <button
-                              type="button"
-                              className="widget-move-btn"
-                              disabled={index === currentWidgets.length - 1}
-                              onClick={() => handleMoveWidget(index, "down")}
-                              aria-label={`Move ${meta.name} down`}
-                              title="Move down"
-                            >
-                              <CaretDown size={14} weight="bold" />
-                            </button>
-                          </div>
-
-                          <div className="dashboard-widget-icon" aria-hidden="true">
-                            {meta.icon}
-                          </div>
-
-                          <div className="dashboard-widget-info">
-                            <div className="dashboard-widget-name-row">
-                              <span className="dashboard-widget-name">{meta.name}</span>
-                              {meta.badge && <span className="dashboard-widget-badge">{meta.badge}</span>}
+                          <div className="dashboard-widget-row-main">
+                            <div className="dashboard-widget-reorder-btns">
+                              <button
+                                type="button"
+                                className="widget-move-btn"
+                                disabled={index === 0}
+                                onClick={() => handleMoveWidget(index, "up")}
+                                aria-label={`Move ${meta.name} up`}
+                                title="Move up"
+                              >
+                                <CaretUp size={14} weight="bold" />
+                              </button>
+                              <button
+                                type="button"
+                                className="widget-move-btn"
+                                disabled={index === currentWidgets.length - 1}
+                                onClick={() => handleMoveWidget(index, "down")}
+                                aria-label={`Move ${meta.name} down`}
+                                title="Move down"
+                              >
+                                <CaretDown size={14} weight="bold" />
+                              </button>
                             </div>
-                            <span className="dashboard-widget-desc">{meta.description}</span>
+
+                            <div className="dashboard-widget-icon" aria-hidden="true">
+                              {meta.icon}
+                            </div>
+
+                            <div className="dashboard-widget-info">
+                              <div className="dashboard-widget-name-row">
+                                <span className="dashboard-widget-name">{meta.name}</span>
+                                {meta.badge && <span className="dashboard-widget-badge">{meta.badge}</span>}
+                                {meta.minWidth !== "small" && (
+                                  <span className="dashboard-widget-min-badge" title={`Minimum width is ${WIDGET_WIDTH_LABELS[meta.minWidth].label}`}>
+                                    Min {WIDGET_WIDTH_LABELS[meta.minWidth].short}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="dashboard-widget-desc">{meta.description}</span>
+                            </div>
+
+                            <div className="dashboard-widget-toggle-wrap">
+                              <button
+                                type="button"
+                                className={`widget-visibility-toggle ${widget.visible ? "is-active" : "is-hidden"}`}
+                                onClick={() => handleToggleWidgetVisibility(widget.id)}
+                                aria-label={widget.visible ? `Hide ${meta.name}` : `Show ${meta.name}`}
+                                title={widget.visible ? "Hide from dashboard" : "Show on dashboard"}
+                              >
+                                {widget.visible ? (
+                                  <>
+                                    <Eye size={15} weight="bold" />
+                                    <span>Visible</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <EyeSlash size={15} weight="bold" />
+                                    <span>Hidden</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
                           </div>
 
-                          <div className="dashboard-widget-toggle-wrap">
-                            <button
-                              type="button"
-                              className={`widget-visibility-toggle ${widget.visible ? "is-active" : "is-hidden"}`}
-                              onClick={() => handleToggleWidgetVisibility(widget.id)}
-                              aria-label={widget.visible ? `Hide ${meta.name}` : `Show ${meta.name}`}
-                              title={widget.visible ? "Hide from dashboard" : "Show on dashboard"}
-                            >
-                              {widget.visible ? (
-                                <>
-                                  <Eye size={15} weight="bold" />
-                                  <span>Visible</span>
-                                </>
-                              ) : (
-                                <>
-                                  <EyeSlash size={15} weight="bold" />
-                                  <span>Hidden</span>
-                                </>
-                              )}
-                            </button>
-                          </div>
+                          {widget.visible && (
+                            <div className="dashboard-widget-dimensions-row">
+                              <span className="dashboard-dim-summary-tag">
+                                Current size: {WIDGET_WIDTH_LABELS[width].label} ({getWidgetColumnSpan(width)} columns) · {WIDGET_HEIGHT_LABELS[height].label}
+                              </span>
+                              <span className="dashboard-dim-tip-text">
+                                💡 Drag edges directly on dashboard to resize
+                              </span>
+                            </div>
+                          )}
                         </div>
                       );
                     })}

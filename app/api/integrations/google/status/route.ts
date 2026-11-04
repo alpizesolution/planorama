@@ -47,6 +47,7 @@ export async function GET() {
         userPicture: acc.userPicture,
         isPrimary: Boolean(acc.isPrimary),
         connectedAt: acc.connectedAt,
+        customDisplayName: acc.customDisplayName,
       })),
     });
   } catch (error) {

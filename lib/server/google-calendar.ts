@@ -54,6 +54,7 @@ export interface GoogleCalendarEvent {
   updated?: string;
   etag?: string;
   visibility?: "default" | "public" | "private" | "confidential";
+  eventType?: "default" | "outOfOffice" | "focusTime" | "workingLocation" | "holiday" | string;
 }
 
 export interface GoogleEventsListResponse {

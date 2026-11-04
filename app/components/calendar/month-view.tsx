@@ -1,9 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import {
-  CaretLeft,
-  CaretRight,
   Plus,
   Lock,
   CalendarBlank,
@@ -21,6 +19,8 @@ import {
   DEFAULT_ITEM_STYLES,
   type ItemStylesPreferences,
 } from "@/lib/calendar/item-color";
+import { toDateKey } from "@/lib/calendar/date-utils";
+import { CalendarWorkspaceHeader } from "./calendar-workspace-header";
 
 interface MonthViewProps {
   shownDate: Date;
@@ -114,6 +114,30 @@ export function MonthView({
   const monthName = shownDate.toLocaleDateString("en", { month: "long" });
   const yearName = shownDate.getFullYear();
 
+  // Touch swipe support for month navigation
+  const touchStartXRef = useRef<number | null>(null);
+  const touchStartYRef = useRef<number | null>(null);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartXRef.current = e.touches[0].clientX;
+    touchStartYRef.current = e.touches[0].clientY;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartXRef.current === null || touchStartYRef.current === null) return;
+    const deltaX = e.changedTouches[0].clientX - touchStartXRef.current;
+    const deltaY = e.changedTouches[0].clientY - touchStartYRef.current;
+    if (Math.abs(deltaX) > 50 && Math.abs(deltaX) > Math.abs(deltaY) * 1.5) {
+      if (deltaX > 0) {
+        onNavigateMonth(-1); // swipe right -> previous month
+      } else {
+        onNavigateMonth(1); // swipe left -> next month
+      }
+    }
+    touchStartXRef.current = null;
+    touchStartYRef.current = null;
+  };
+
   // Helper to format 24h time to 12h time (e.g. "09:30" -> "9:30 AM")
   function formatTime(timeStr?: string | null): string {
     if (!timeStr) return "";
@@ -132,63 +156,57 @@ export function MonthView({
       style={{ backgroundColor: resolvedTheme.calendarBg }}
     >
       {/* 1. Month Header Toolbar */}
-      <div className="month-toolbar">
-        <div className="toolbar-left">
-          {/* Month & Year Badge */}
-          <div className="month-heading-group">
-            <span className="month-kicker">MONTH WORKSPACE</span>
-            <div className="month-title-row">
-              <span
-                className="month-header-badge"
-                style={{
-                  backgroundColor: monthThemeColor.bg,
-                  borderColor: monthThemeColor.border,
-                  color: monthThemeColor.text,
-                }}
-              >
-                {monthName} {yearName}
-              </span>
+      <CalendarWorkspaceHeader
+        kicker="MONTH WORKSPACE"
+        title={
+          <span
+            className="month-header-badge"
+            style={{
+              backgroundColor: monthThemeColor.bg,
+              borderColor: monthThemeColor.border,
+              color: monthThemeColor.text,
+            }}
+          >
+            {monthName} {yearName}
+          </span>
+        }
+        compactTitle={
+          <span
+            className="month-header-badge"
+            style={{
+              backgroundColor: monthThemeColor.bg,
+              borderColor: monthThemeColor.border,
+              color: monthThemeColor.text,
+            }}
+          >
+            {monthName.slice(0, 3)} {yearName}
+          </span>
+        }
+        isToday={shownDate.getMonth() === today.getMonth() && shownDate.getFullYear() === today.getFullYear()}
+        todayTagLabel="This Month"
+        badge={
+          activeCalendarCount > 0 ? (
+            <div className="active-calendars-pill" title={`${activeCalendarCount} calendars visible`}>
+              <span className="indicator-dot" />
+              <span>{activeCalendarCount} calendars</span>
             </div>
-          </div>
-
-          {/* Navigation Controls */}
-          <div className="month-nav-controls">
-            <button
-              type="button"
-              className="month-today-btn"
-              onClick={onResetToToday}
-              title="Jump to current date"
-            >
-              Today
-            </button>
-            <div className="month-arrow-btns">
-              <button
-                type="button"
-                className="icon-button"
-                aria-label="Previous month"
-                onClick={() => onNavigateMonth(-1)}
-              >
-                <CaretLeft size={16} weight="bold" />
-              </button>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label="Next month"
-                onClick={() => onNavigateMonth(1)}
-              >
-                <CaretRight size={16} weight="bold" />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="toolbar-right">
-          <div className="active-calendars-pill" title={`${activeCalendarCount} calendars visible`}>
-            <span className="indicator-dot" />
-            <span>{activeCalendarCount} calendars</span>
-          </div>
-        </div>
-      </div>
+          ) : undefined
+        }
+        onPrevious={() => onNavigateMonth(-1)}
+        previousLabel="Previous month"
+        onToday={onResetToToday}
+        todayButtonLabel="Today"
+        onNext={() => onNavigateMonth(1)}
+        nextLabel="Next month"
+        datePickerValue={toDateKey(shownDate)}
+        onDatePickerChange={(dateStr) => {
+          const [y, m] = dateStr.split("-").map(Number);
+          const monthDiff = (y - shownDate.getFullYear()) * 12 + (m - 1 - shownDate.getMonth());
+          if (monthDiff !== 0) onNavigateMonth(monthDiff);
+          onSelectDate(dateStr);
+        }}
+        datePickerAriaLabel="Jump to month"
+      />
 
       {/* 2. Weekday Header Row */}
       <div className="month-weekdays-row">
@@ -203,7 +221,11 @@ export function MonthView({
       </div>
 
       {/* 3. Expansive Month Days Grid */}
-      <div className="month-grid-container">
+      <div
+        className="month-grid-container"
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+      >
         {calendarDays.map((item, index) => {
           if (!item.day) {
             return (
@@ -395,6 +417,116 @@ export function MonthView({
           );
         })}
       </div>
+
+      {/* 3B. Responsive Selected Date Details Section */}
+      {selectedDate && (() => {
+        const selectedTasks = tasksByDate.get(selectedDate) || [];
+        const [sy, sm, sd] = selectedDate.split("-").map(Number);
+        const selectedDateObj = new Date(sy, sm - 1, sd);
+        const formattedDate = selectedDateObj.toLocaleDateString("en-US", {
+          weekday: "long",
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        });
+
+        return (
+          <div className="month-selected-date-panel neo-card" role="region" aria-label={`Details for ${formattedDate}`}>
+            <div className="month-selected-date-header">
+              <div className="month-selected-date-title-group">
+                <span className="selected-date-kicker">SELECTED DATE DETAILS</span>
+                <h3 className="month-selected-date-title">{formattedDate}</h3>
+                <span className="month-selected-date-count">
+                  {selectedTasks.length} {selectedTasks.length === 1 ? "item" : "items"} scheduled
+                </span>
+              </div>
+              <div className="month-selected-date-actions">
+                <button
+                  type="button"
+                  className="month-selected-add-btn"
+                  onClick={() => onAddTask({ date: selectedDate, status: "open" })}
+                >
+                  <Plus size={14} weight="bold" />
+                  <span>Add Item</span>
+                </button>
+                <button
+                  type="button"
+                  className="month-selected-close-btn"
+                  onClick={() => onSelectDate(null)}
+                  aria-label="Clear selected date"
+                  title="Clear selection"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            <div className="month-selected-items-list">
+              {selectedTasks.length === 0 ? (
+                <div className="month-selected-empty">
+                  <span>✨ No events or tasks scheduled for this day.</span>
+                  <button
+                    type="button"
+                    className="month-empty-add-btn"
+                    onClick={() => onAddTask({ date: selectedDate, status: "open" })}
+                  >
+                    + Add something to {selectedDateObj.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  </button>
+                </div>
+              ) : (
+                selectedTasks.map((t) => {
+                  const itemType = getItemType(t);
+                  const isAppointment = itemType === "appointment";
+                  const isEvent = itemType === "event" || Boolean(t.isGoogleEvent || t.durationMinutes || t.isAllDay);
+                  const tileStyle = getItemTileStyle(t, itemStyles, allCalendarConfigs);
+                  const isDone = t.status === "completed";
+                  const timeLabel = formatTime(t.dueTime);
+
+                  return (
+                    <div
+                      key={t.id}
+                      className={`month-selected-item-row ${tileStyle.className} ${isDone ? "is-completed" : ""}`}
+                      onClick={() => onOpenTaskDetail(t)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          onOpenTaskDetail(t);
+                        }
+                      }}
+                    >
+                      <span
+                        className="item-color-bar"
+                        style={{ backgroundColor: tileStyle.indicatorColor }}
+                      />
+                      <div className="item-meta">
+                        <span className="item-time">
+                          {t.isAllDay ? "All Day" : timeLabel ? timeLabel : "Whenever"}
+                        </span>
+                        <strong className="item-title">{t.title}</strong>
+                        {t.location && <span className="item-location">📍 {t.location}</span>}
+                      </div>
+                      <div className="item-type-badge-wrap">
+                        <span
+                          className="item-type-pill"
+                          style={{
+                            backgroundColor: `${tileStyle.primaryColor}22`,
+                            color: tileStyle.indicatorColor,
+                            borderColor: tileStyle.borderColor,
+                          }}
+                        >
+                          {isAppointment ? "⏱️ Appt" : isEvent ? "📅 Event" : "☑️ Task"}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 4. Calendar Footer & Shortcuts */}
       <div className="month-calendar-footer">

@@ -15,6 +15,7 @@ import {
   DEFAULT_ITEM_STYLES,
   type ItemStylesPreferences,
 } from "@/lib/calendar/item-color";
+import { CalendarWorkspaceHeader } from "./calendar-workspace-header";
 
 export interface YearViewProps {
   shownYear: number;
@@ -22,6 +23,7 @@ export interface YearViewProps {
   todayKey: string;
   selectedDate: string | null;
   onSelectDate: (dateKey: string) => void;
+  onSelectMonth?: (monthIndex: number) => void;
   onClearSelectedDate: () => void;
   onYearChange: (deltaOrTarget: number | "current") => void;
   weekStartsOn: 0 | 1 | 6;
@@ -36,9 +38,11 @@ export interface YearViewProps {
 
 export function YearView({
   shownYear,
+  today,
   todayKey,
   selectedDate,
   onSelectDate,
+  onSelectMonth,
   onClearSelectedDate,
   onYearChange,
   weekStartsOn,
@@ -81,41 +85,19 @@ export function YearView({
       style={{ backgroundColor: resolvedTheme.calendarBg }}
     >
       {/* 1. Header Toolbar */}
-      <div className="card-header year-view-header">
-        <div className="year-header-left">
-          <div className="year-title-group">
-            <span className="section-kicker">FULL YEAR CALENDAR</span>
-            <h2 className="year-main-heading">{shownYear} Yearly Planner</h2>
-          </div>
-        </div>
-
-        {/* Year Navigation Controls */}
-        <div className="calendar-actions">
-          <button
-            type="button"
-            className="icon-button"
-            aria-label="Previous year"
-            onClick={() => onYearChange(-1)}
-          >
-            ←
-          </button>
-          <button
-            type="button"
-            className="icon-button today-btn"
-            onClick={() => onYearChange("current")}
-          >
-            This Year
-          </button>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label="Next year"
-            onClick={() => onYearChange(1)}
-          >
-            →
-          </button>
-        </div>
-      </div>
+      <CalendarWorkspaceHeader
+        kicker="FULL YEAR CALENDAR"
+        title={`${shownYear} Yearly Planner`}
+        compactTitle={`${shownYear}`}
+        isToday={shownYear === today.getFullYear()}
+        todayTagLabel="This Year"
+        todayButtonLabel="This Year"
+        onPrevious={() => onYearChange(-1)}
+        previousLabel="Previous year"
+        onToday={() => onYearChange("current")}
+        onNext={() => onYearChange(1)}
+        nextLabel="Next year"
+      />
 
       {/* 2. Twelve Monthly Calendar Tiles */}
       <div className="year-planner-grid">
@@ -141,7 +123,18 @@ export function YearView({
                   backgroundColor: monthColor.bg,
                   borderColor: monthColor.border,
                   color: monthColor.text,
+                  cursor: onSelectMonth ? "pointer" : "default",
                 }}
+                onClick={() => onSelectMonth?.(monthIndex)}
+                role={onSelectMonth ? "button" : undefined}
+                tabIndex={onSelectMonth ? 0 : undefined}
+                onKeyDown={(e) => {
+                  if (onSelectMonth && (e.key === "Enter" || e.key === " ")) {
+                    e.preventDefault();
+                    onSelectMonth(monthIndex);
+                  }
+                }}
+                title={onSelectMonth ? `Open ${monthTitle} in Month View` : undefined}
               >
                 <span className="year-month-title" style={{ color: monthColor.text }}>
                   {monthTitle}

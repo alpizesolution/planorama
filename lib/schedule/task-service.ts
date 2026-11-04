@@ -2,9 +2,15 @@ import { validateNewTask, validateTask } from "./validation";
 import { deleteLocalTask, listLocalTasks, saveLocalTask } from "./local-store";
 import type { NewPlannerTask, PlannerTask } from "./types";
 import { generateId } from "./id";
+import { sanitizePlannerTasks } from "../calendar/item-classifier";
 
 export async function getTasks(): Promise<PlannerTask[]> {
-  return listLocalTasks();
+  const tasks = await listLocalTasks();
+  const { sanitized, correctedCount } = sanitizePlannerTasks(tasks);
+  if (correctedCount > 0) {
+    Promise.all(sanitized.map((t) => saveLocalTask(t))).catch(() => {});
+  }
+  return sanitized;
 }
 
 export async function createTask(input: NewPlannerTask): Promise<PlannerTask> {

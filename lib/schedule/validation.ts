@@ -78,7 +78,10 @@ export function validateNewTask(value: NewPlannerTask): Omit<PlannerTask, "id" |
     recurringEventId: value.recurringEventId,
     durationMinutes: value.durationMinutes,
     isAllDay: value.isAllDay,
+    isHoliday: value.isHoliday,
+    eventType: value.eventType,
     itemType: value.itemType,
     color: value.color,
+    textColor: value.textColor,
   };
 }

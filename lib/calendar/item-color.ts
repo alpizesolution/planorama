@@ -580,7 +580,10 @@ export function getItemType(task: Partial<PlannerTask>): PlannerItemType {
   if ((task as { scheduleId?: string }).scheduleId) {
     return "appointment";
   }
-  if (task.isGoogleEvent || task.googleEventId) {
+  if (task.isHoliday || (task as { eventType?: string }).eventType === "holiday") {
+    return "event";
+  }
+  if (task.isGoogleEvent || task.googleEventId || task.source === "google") {
     return "event";
   }
   // If created as an event (has duration or all-day with no project/priority)

@@ -3,6 +3,7 @@ import { getVerifiedSession } from "@/lib/server/session";
 import { fetchCalendarList, GoogleAuthError } from "@/lib/server/google-calendar";
 import { getAllConnectedAccounts, getSyncMeta, saveSyncMeta } from "@/lib/server/google-token-store";
 import type { GoogleCalendarConfig } from "@/lib/google-calendar/types";
+import { isHolidayCalendar } from "@/lib/calendar/item-classifier";
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +48,7 @@ export async function GET(request: Request) {
 
     const items = await fetchCalendarList(session.userId, requestedAccountId);
 
-    // Cache verified calendar list for fast server-side authorization during sync
+    let customNames: Record<string, string> = {};
     try {
       const meta = await getSyncMeta(session.userId);
       meta.verifiedCalendars = {
@@ -55,23 +56,37 @@ export async function GET(request: Request) {
         cachedAt: Date.now(),
       };
       await saveSyncMeta(session.userId, meta);
+      customNames = meta.customCalendarNames || {};
     } catch {
       // Non-fatal cache failure
     }
 
-    const calendars: GoogleCalendarConfig[] = items.map((cal, idx) => ({
-      id: cal.id,
-      name: cal.summary,
-      description: cal.description,
-      primary: cal.primary,
-      accessRole: cal.accessRole,
-      color: cal.backgroundColor || PLANORAMA_ACCENT_COLORS[idx % PLANORAMA_ACCENT_COLORS.length],
-      enabled: Boolean(cal.primary), // default primary calendar to enabled
-      syncDirection: cal.accessRole === "reader" || cal.accessRole === "freeBusyReader" ? "import_only" : "two_way",
-      privacyMode: cal.accessRole === "freeBusyReader" ? "availability_only" : "full_details",
-      accountId: cal.accountId,
-      accountEmail: cal.accountEmail,
-    }));
+    const userAccounts = await getAllConnectedAccounts(session.userId);
+    const accountsById = new Map(userAccounts.map((a) => [a.accountId, a]));
+    const accountsByEmail = new Map(userAccounts.map((a) => [a.userEmail.toLowerCase(), a]));
+
+    const calendars: GoogleCalendarConfig[] = items.map((cal, idx) => {
+      const acc =
+        (cal.accountId ? accountsById.get(cal.accountId) : undefined) ||
+        (cal.accountEmail ? accountsByEmail.get(cal.accountEmail.toLowerCase()) : undefined);
+
+      return {
+        id: cal.id,
+        name: cal.summary,
+        customDisplayName: customNames[cal.id] || undefined,
+        accountCustomDisplayName: acc?.customDisplayName,
+        description: cal.description,
+        primary: cal.primary,
+        accessRole: cal.accessRole,
+        color: cal.backgroundColor || PLANORAMA_ACCENT_COLORS[idx % PLANORAMA_ACCENT_COLORS.length],
+        enabled: Boolean(cal.primary), // default primary calendar to enabled
+        syncDirection: cal.accessRole === "reader" || cal.accessRole === "freeBusyReader" ? "import_only" : "two_way",
+        privacyMode: cal.accessRole === "freeBusyReader" ? "availability_only" : "full_details",
+        accountId: cal.accountId || acc?.accountId,
+        accountEmail: cal.accountEmail || acc?.userEmail,
+        isHolidayCalendar: isHolidayCalendar(cal),
+      };
+    });
 
     return NextResponse.json({ calendars });
   } catch (error) {

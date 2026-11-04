@@ -49,6 +49,8 @@ export type PlannerTask = {
   recurringEventId?: string;
   durationMinutes?: number;
   isAllDay?: boolean;
+  isHoliday?: boolean;
+  eventType?: string;
   itemType?: import("../calendar/item-color").PlannerItemType;
   color?: string;
   textColor?: string;

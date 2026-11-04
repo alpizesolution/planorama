@@ -33,6 +33,7 @@ export interface StoredGoogleCredentials {
   connectedAt: string;
   updatedAt: string;
   isPrimary?: boolean;
+  customDisplayName?: string;
 }
 
 export interface StoredGoogleAccount {
@@ -47,6 +48,7 @@ export interface StoredGoogleAccount {
   connectedAt: string;
   updatedAt: string;
   isPrimary?: boolean;
+  customDisplayName?: string;
 }
 
 export interface StoredUserGoogleData {
@@ -65,6 +67,7 @@ export interface StoredCalendarSyncMeta {
     items: GoogleCalendarItem[];
     cachedAt: number;
   };
+  customCalendarNames?: Record<string, string>; // calendarId -> custom name
 }
 
 // Durable file storage directory (local dev / migration source)
@@ -142,7 +145,26 @@ async function atomicWriteFile(filePath: string, content: string): Promise<void>
   const tempPath = `${filePath}.tmp.${Date.now()}.${crypto.randomBytes(4).toString("hex")}`;
   try {
     await fs.writeFile(tempPath, content, "utf8");
-    await fs.rename(tempPath, filePath);
+    // On Windows, fs.rename can transiently fail with EPERM/EBUSY if the destination
+    // file is momentarily locked by the filesystem indexer. Retry with exponential backoff.
+    let renamed = false;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        await fs.rename(tempPath, filePath);
+        renamed = true;
+        break;
+      } catch (renameErr: unknown) {
+        const code = (renameErr as { code?: string })?.code;
+        if ((code === "EPERM" || code === "EBUSY") && attempt < 4) {
+          await new Promise((resolve) => setTimeout(resolve, 30 * (attempt + 1)));
+          continue;
+        }
+        throw renameErr;
+      }
+    }
+    if (!renamed) {
+      await fs.rename(tempPath, filePath);
+    }
   } catch (err) {
     await fs.unlink(tempPath).catch(() => {});
     throw new StorageUnavailableError(`Durable write failed for ${path.basename(filePath)}`, err);
@@ -382,6 +404,11 @@ async function loadUserData(ownerId: string): Promise<StoredUserGoogleData> {
 async function writeUserData(ownerId: string, data: StoredUserGoogleData): Promise<void> {
   const payload = encryptText(JSON.stringify(data));
   const mode = getActiveStorageMode();
+  const accountDisplayNames = Object.fromEntries(
+    Object.entries(data.accounts)
+      .filter(([_, acc]) => Boolean(acc.customDisplayName))
+      .map(([accId, acc]) => [accId, acc.customDisplayName as string])
+  );
 
   if (mode === "mock_firestore" && activeMockStore) {
     const docPath = getFirestoreCredentialsPath(ownerId);
@@ -390,6 +417,7 @@ async function writeUserData(ownerId: string, data: StoredUserGoogleData): Promi
       primaryAccountId: data.primaryAccountId,
       ownerId,
       updatedAt: data.updatedAt,
+      accountDisplayNames,
     } as unknown as Record<string, unknown>);
     return;
   }
@@ -401,6 +429,7 @@ async function writeUserData(ownerId: string, data: StoredUserGoogleData): Promi
       primaryAccountId: data.primaryAccountId,
       ownerId,
       updatedAt: data.updatedAt,
+      accountDisplayNames,
     });
     return;
   }
@@ -423,18 +452,31 @@ export async function saveEncryptedCredentials(
   const isFirstAccount = Object.keys(current.accounts).length === 0;
   const isPrimary = credentials.isPrimary ?? (isFirstAccount || current.primaryAccountId === accountId);
 
+  // Preserve existing customDisplayName if not explicitly provided in credentials
+  const existingAccount =
+    current.accounts[accountId] ||
+    Object.values(current.accounts).find(
+      (a) => a.userEmail.toLowerCase() === (credentials.userEmail || "").toLowerCase()
+    );
+
+  const customDisplayName =
+    credentials.customDisplayName !== undefined
+      ? credentials.customDisplayName
+      : existingAccount?.customDisplayName;
+
   const account: StoredGoogleAccount = {
     accountId,
     userEmail: credentials.userEmail || accountId,
     userName: credentials.userName,
     userPicture: credentials.userPicture,
     accessToken: credentials.accessToken,
-    refreshToken: credentials.refreshToken,
+    refreshToken: credentials.refreshToken || existingAccount?.refreshToken,
     expiresAt: credentials.expiresAt,
     scope: credentials.scope,
-    connectedAt: credentials.connectedAt || new Date().toISOString(),
+    connectedAt: credentials.connectedAt || existingAccount?.connectedAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     isPrimary,
+    customDisplayName,
   };
 
   current.accounts[accountId] = account;
@@ -489,6 +531,7 @@ export async function getDecryptedCredentials(
     connectedAt: selectedAccount.connectedAt,
     updatedAt: selectedAccount.updatedAt,
     isPrimary: selectedAccount.isPrimary,
+    customDisplayName: selectedAccount.customDisplayName,
   };
 }
 
@@ -498,6 +541,66 @@ export async function getDecryptedCredentials(
 export async function getAllConnectedAccounts(ownerId: string): Promise<StoredGoogleAccount[]> {
   const data = await loadUserData(ownerId);
   return Object.values(data.accounts);
+}
+
+/**
+ * Update custom display name for a specific connected Google account.
+ * Associated with the accountId in Firestore.
+ */
+export async function updateAccountCustomDisplayName(
+  ownerId: string,
+  accountId: string,
+  customDisplayName?: string | null
+): Promise<StoredGoogleAccount | null> {
+  const data = await loadUserData(ownerId);
+  let target: StoredGoogleAccount | undefined = data.accounts[accountId];
+  if (!target) {
+    target = Object.values(data.accounts).find(
+      (a) => a.userEmail.toLowerCase() === accountId.toLowerCase()
+    );
+  }
+
+  if (!target) {
+    return null;
+  }
+
+  const trimmed = customDisplayName?.trim();
+  if (trimmed) {
+    target.customDisplayName = trimmed;
+  } else {
+    delete target.customDisplayName;
+  }
+
+  target.updatedAt = new Date().toISOString();
+  data.updatedAt = new Date().toISOString();
+
+  await writeUserData(ownerId, data);
+  return target;
+}
+
+/**
+ * Update custom display name for a specific calendar.
+ * Persisted in the user's sync metadata in Firestore.
+ */
+export async function updateCalendarCustomDisplayName(
+  ownerId: string,
+  calendarId: string,
+  customDisplayName?: string | null
+): Promise<StoredCalendarSyncMeta> {
+  const meta = await getSyncMeta(ownerId);
+  if (!meta.customCalendarNames) {
+    meta.customCalendarNames = {};
+  }
+
+  const trimmed = customDisplayName?.trim();
+  if (trimmed) {
+    meta.customCalendarNames[calendarId] = trimmed;
+  } else {
+    delete meta.customCalendarNames[calendarId];
+  }
+
+  await saveSyncMeta(ownerId, meta);
+  return meta;
 }
 
 /**
@@ -581,9 +684,10 @@ export async function migrateSessionOwnership(guestSessionId: string, targetUser
 
   // 4. Migrate sync meta
   const guestMeta = await getSyncMeta(guestSessionId);
-  if (Object.keys(guestMeta.syncTokens || {}).length > 0) {
+  if (Object.keys(guestMeta.syncTokens || {}).length > 0 || (guestMeta.customCalendarNames && Object.keys(guestMeta.customCalendarNames).length > 0)) {
     const targetMeta = await getSyncMeta(targetUserId);
     targetMeta.syncTokens = { ...guestMeta.syncTokens, ...(targetMeta.syncTokens || {}) };
+    targetMeta.customCalendarNames = { ...guestMeta.customCalendarNames, ...(targetMeta.customCalendarNames || {}) };
     targetMeta.lastSyncedAt = targetMeta.lastSyncedAt || guestMeta.lastSyncedAt;
     await saveSyncMeta(targetUserId, targetMeta);
   }

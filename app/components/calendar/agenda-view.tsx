@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
-import { Plus, Lock, CalendarBlank, CheckCircle, Circle, Clock, CheckSquare } from "@phosphor-icons/react";
+import { useMemo, useState } from "react";
+import { Plus, Lock, CalendarBlank, CheckCircle, Circle, Clock, CheckSquare, MagnifyingGlass } from "@phosphor-icons/react";
 import type { PlannerTask } from "@/lib/schedule/types";
 import type { GoogleCalendarConfig } from "@/lib/google-calendar/types";
 import type { ResolvedCalendarTheme } from "@/lib/calendar/calendar-themes";
@@ -13,6 +13,7 @@ import {
   DEFAULT_ITEM_STYLES,
   type ItemStylesPreferences,
 } from "@/lib/calendar/item-color";
+import { CalendarWorkspaceHeader } from "./calendar-workspace-header";
 
 export interface TaskLabel {
   id: string;
@@ -57,12 +58,35 @@ export function AgendaView({
   onAddTask,
   onToggleTask,
 }: AgendaViewProps) {
-  // Filter by selected date if one is selected in the mini-calendar
+  const [searchQuery, setSearchQuery] = useState("");
+  const [typeFilter, setTypeFilter] = useState<"all" | "event" | "task" | "appointment">("all");
+
+  // Filter by selected date, type filter, and search query
   const filteredTasks = useMemo(() => {
     let list = tasks.filter((t) => t.dueDate);
     if (selectedDate) {
       list = list.filter((t) => t.dueDate === selectedDate);
     }
+    if (typeFilter !== "all") {
+      list = list.filter((t) => {
+        const type = getItemType(t);
+        if (typeFilter === "appointment") return type === "appointment";
+        if (typeFilter === "event") return type === "event" || Boolean(t.isGoogleEvent);
+        if (typeFilter === "task") return type === "task" && !t.isGoogleEvent;
+        return true;
+      });
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      list = list.filter(
+        (t) =>
+          t.title.toLowerCase().includes(q) ||
+          Boolean(t.notes?.toLowerCase().includes(q)) ||
+          Boolean(t.location?.toLowerCase().includes(q)) ||
+          Boolean(t.googleCalendarName?.toLowerCase().includes(q))
+      );
+    }
+
     // Sort chronologically: date asc -> time asc (nulls/all-day first) -> pinned first
     return list.slice().sort((a, b) => {
       const aDate = a.dueDate ?? "";
@@ -77,7 +101,7 @@ export function AgendaView({
       const bTime = b.dueTime ?? "00:00-allday";
       return aTime.localeCompare(bTime);
     });
-  }, [tasks, selectedDate]);
+  }, [tasks, selectedDate, typeFilter, searchQuery]);
 
   // Group filtered tasks by date for readable agenda sections
   const groupedByDate = useMemo(() => {
@@ -130,6 +154,27 @@ export function AgendaView({
     return `${h12}:${mStr} ${suffix}`;
   };
 
+  const formatItemSchedule = (dueTime?: string | null, durationMinutes?: number | null): string => {
+    if (!dueTime) return "All day";
+    const start = formatItemTime(dueTime);
+    if (!durationMinutes || durationMinutes <= 0) return start;
+    const [hStr, mStr] = dueTime.split(":");
+    const h = parseInt(hStr, 10);
+    const m = parseInt(mStr, 10);
+    if (isNaN(h) || isNaN(m)) return start;
+    const totalEndMin = h * 60 + m + durationMinutes;
+    const endH = Math.floor(totalEndMin / 60) % 24;
+    const endM = totalEndMin % 60;
+    const endHStr = String(endH).padStart(2, "0");
+    const endMStr = String(endM).padStart(2, "0");
+    const endFormatted = formatItemTime(`${endHStr}:${endMStr}`);
+    const durationLabel =
+      durationMinutes >= 60
+        ? `${Math.floor(durationMinutes / 60)}h${durationMinutes % 60 > 0 ? ` ${durationMinutes % 60}m` : ""}`
+        : `${durationMinutes}m`;
+    return `${start} – ${endFormatted} (${durationLabel})`;
+  };
+
   const formatFilterTitle = (dateKey: string): string => {
     const [y, m, d] = dateKey.split("-").map(Number);
     const date = new Date(y, m - 1, d);
@@ -143,30 +188,67 @@ export function AgendaView({
       style={{ backgroundColor: resolvedTheme.calendarBg }}
     >
       {/* 1. Agenda Header Toolbar */}
-      <div className="card-header agenda-view-header">
-        <div className="agenda-header-left">
-          <div className="agenda-title-group">
-            <span className="section-kicker">CHRONOLOGICAL SCHEDULE</span>
-            <div className="agenda-title-row">
-              <h2 className="agenda-main-heading">Agenda</h2>
-              {selectedDate && (
-                <div className="agenda-date-filter-chip">
-                  <span>Filtered: {formatFilterTitle(selectedDate)}</span>
-                  <button
-                    type="button"
-                    onClick={() => onSelectDate(null)}
-                    aria-label="Clear date filter"
-                    title="Clear date filter to view all upcoming events"
-                    className="agenda-clear-filter-btn"
-                  >
-                    ✕
-                  </button>
-                </div>
+      <CalendarWorkspaceHeader
+        kicker="CHRONOLOGICAL SCHEDULE"
+        title="Agenda"
+        compactTitle="Agenda"
+        badge={
+          selectedDate ? (
+            <div className="agenda-date-filter-chip">
+              <span>Filtered: {formatFilterTitle(selectedDate)}</span>
+              <button
+                type="button"
+                onClick={() => onSelectDate(null)}
+                aria-label="Clear date filter"
+                title="Clear date filter to view all upcoming events"
+                className="agenda-clear-filter-btn"
+              >
+                ✕
+              </button>
+            </div>
+          ) : undefined
+        }
+        datePickerValue={selectedDate || ""}
+        onDatePickerChange={(date) => onSelectDate(date || null)}
+        datePickerAriaLabel="Filter agenda by date"
+        extraControls={
+          <div className="agenda-filter-toolbar">
+            <div className="agenda-search-box">
+              <MagnifyingGlass size={13} weight="bold" className="agenda-search-icon" />
+              <input
+                type="text"
+                className="agenda-search-input"
+                placeholder="Search schedule…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                aria-label="Search schedule"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  className="agenda-search-clear"
+                  onClick={() => setSearchQuery("")}
+                  aria-label="Clear search"
+                >
+                  ✕
+                </button>
               )}
             </div>
+            <div className="agenda-type-filter-tabs">
+              {(["all", "event", "task", "appointment"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  className={`agenda-type-tab ${typeFilter === t ? "is-active" : ""}`}
+                  onClick={() => setTypeFilter(t)}
+                >
+                  {t === "all" ? "All" : t === "event" ? "Events" : t === "task" ? "Tasks" : "Appts"}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-      </div>
+        }
+      />
 
       {/* 2. Chronological Agenda List */}
       <div className="agenda-list agenda-workspace-list">
@@ -233,7 +315,7 @@ export function AgendaView({
 
                       {/* Time Indicator */}
                       <span className="agenda-item-time">
-                        {formatItemTime(task.dueTime)}
+                        {formatItemSchedule(task.dueTime, task.durationMinutes)}
                       </span>
 
                       {/* Task / Event Title & Meta */}

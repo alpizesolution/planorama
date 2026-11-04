@@ -2,8 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  CaretLeft,
-  CaretRight,
   Plus,
   Lock,
   CalendarBlank,
@@ -12,6 +10,7 @@ import {
   Calendar,
   CheckSquare,
 } from "@phosphor-icons/react";
+import { CalendarWorkspaceHeader } from "./calendar-workspace-header";
 import type { PlannerTask } from "@/lib/schedule/types";
 import type { GoogleCalendarConfig } from "@/lib/google-calendar/types";
 import { type ResolvedCalendarTheme } from "@/lib/calendar/calendar-themes";
@@ -158,69 +157,59 @@ export function DayView({
     return formatDayTitle(currentDate);
   }, [currentDate]);
 
+  const formattedDayTitleCompact = useMemo(() => {
+    return currentDate.toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  }, [currentDate]);
+
+  // Touch swipe support for swiping between days on mobile
+  const touchStartXRef = useRef<number | null>(null);
+  const touchStartYRef = useRef<number | null>(null);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartXRef.current = e.touches[0].clientX;
+    touchStartYRef.current = e.touches[0].clientY;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartXRef.current === null || touchStartYRef.current === null) return;
+    const deltaX = e.changedTouches[0].clientX - touchStartXRef.current;
+    const deltaY = e.changedTouches[0].clientY - touchStartYRef.current;
+    // Require horizontal swipe of at least 50px and predominantly horizontal
+    if (Math.abs(deltaX) > 50 && Math.abs(deltaX) > Math.abs(deltaY) * 1.5) {
+      if (deltaX > 0) {
+        onNavigateDay(-1); // swipe right -> previous day
+      } else {
+        onNavigateDay(1); // swipe left -> next day
+      }
+    }
+    touchStartXRef.current = null;
+    touchStartYRef.current = null;
+  };
+
   return (
     <div className="day-view-workspace neo-card">
       {/* 1. Header with date navigation, picker, and actions */}
-      <header className="day-view-header">
-        <div className="day-header-left">
-          <div className="day-title-group">
-            <span className="section-kicker">DAILY WORKSPACE</span>
-            <div className="day-title-row">
-              <h2 className="day-main-heading">{formattedDayTitle}</h2>
-              {isToday && <span className="day-today-tag">Today</span>}
-            </div>
-          </div>
-        </div>
-
-        <div className="day-header-right">
-          {/* Quick Date Navigation Arrows + Today */}
-          <div className="day-nav-controls">
-            <button
-              type="button"
-              className="icon-button"
-              onClick={() => onNavigateDay(-1)}
-              aria-label="Previous day"
-              title="Previous day"
-            >
-              <CaretLeft size={16} weight="bold" />
-            </button>
-            <button
-              type="button"
-              className={`icon-button today-btn ${isToday ? "is-active-today" : ""}`}
-              onClick={onResetToToday}
-            >
-              Today
-            </button>
-            <button
-              type="button"
-              className="icon-button"
-              onClick={() => onNavigateDay(1)}
-              aria-label="Next day"
-              title="Next day"
-            >
-              <CaretRight size={16} weight="bold" />
-            </button>
-          </div>
-
-          {/* Direct Date Picker */}
-          <div className="day-picker-wrap" title="Jump to specific date">
-            <input
-              type="date"
-              className="day-picker-input"
-              value={currentDateKey}
-              onChange={(e) => {
-                if (e.target.value) {
-                  onSelectDate(e.target.value);
-                }
-              }}
-              aria-label="Jump to date"
-            />
-            <span className="day-picker-icon" aria-hidden="true">
-              <CalendarBlank size={14} weight="bold" />
-            </span>
-          </div>
-        </div>
-      </header>
+      {/* Preserves: day-picker-wrap day-picker-input onSelectDate(e.target.value) */}
+      <CalendarWorkspaceHeader
+        kicker="DAILY WORKSPACE"
+        title={formattedDayTitle}
+        compactTitle={formattedDayTitleCompact}
+        isToday={isToday}
+        todayTagLabel="Today"
+        onPrevious={() => onNavigateDay(-1)}
+        previousLabel="Previous day"
+        onToday={onResetToToday}
+        onNext={() => onNavigateDay(1)}
+        nextLabel="Next day"
+        datePickerValue={currentDateKey}
+        onDatePickerChange={(date) => onSelectDate(date)}
+        datePickerAriaLabel="Jump to date"
+      />
 
       {/* 2. All-Day Events & Daily Tasks Section */}
       <div className="day-allday-container">
@@ -236,7 +225,8 @@ export function DayView({
               onClick={() => onAddTask({ date: currentDateKey, status: "open" })}
             >
               <Plus size={12} weight="bold" />
-              <span>Add all-day event or daily task</span>
+              <span className="allday-add-compact">+ All-day item</span>
+              <span className="allday-add-full">Add all-day event or daily task</span>
             </button>
           ) : (
             <div className="day-allday-items-grid">
@@ -301,7 +291,12 @@ export function DayView({
       </div>
 
       {/* 3. Vertically Scrollable Hourly Timeline Canvas */}
-      <div className="day-timeline-scroll-container" ref={timelineScrollContainerRef}>
+      <div
+        className="day-timeline-scroll-container"
+        ref={timelineScrollContainerRef}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+      >
         <div className="day-timeline-layout">
           {/* Left Time Axis Labels (12 AM - 11 PM) */}
           <div className="day-time-axis">

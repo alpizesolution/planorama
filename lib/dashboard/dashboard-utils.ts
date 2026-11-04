@@ -2,6 +2,7 @@ import type { PlannerTask } from "../schedule/types";
 import type { Habit, HabitCheckIn } from "../habits/types";
 import { isHabitScheduledForDate } from "../habits/streak-utils";
 import { toDateKey } from "../calendar/date-utils";
+import { isTaskItem, isHolidayItem } from "../calendar/item-classifier";
 
 export interface DailyOverviewStats {
   totalDueToday: number;
@@ -15,18 +16,21 @@ export function calculateDailyOverview(
   tasks: PlannerTask[],
   todayKey: string
 ): DailyOverviewStats {
-  const dueToday = tasks.filter((t) => t.dueDate === todayKey);
+  // Public holidays do not count towards actionable daily tasks
+  const actionableItems = tasks.filter((t) => !isHolidayItem(t));
+  const dueToday = actionableItems.filter((t) => t.dueDate === todayKey);
   const totalDueToday = dueToday.length;
   const completedToday = dueToday.filter((t) => t.status === "completed").length;
   const remainingToday = totalDueToday - completedToday;
+  // Overdue count: strictly genuine incomplete tasks (excludes calendar events, appointments, and holidays)
   const overdueCount = tasks.filter(
-    (t) => t.status !== "completed" && Boolean(t.dueDate && t.dueDate < todayKey)
+    (t) => isTaskItem(t) && t.status !== "completed" && Boolean(t.dueDate && t.dueDate < todayKey)
   ).length;
 
   let progressPercent = 0;
   if (totalDueToday > 0) {
     progressPercent = Math.round((completedToday / totalDueToday) * 100);
-  } else if (overdueCount === 0 && tasks.length > 0) {
+  } else if (overdueCount === 0 && actionableItems.length > 0) {
     progressPercent = 100;
   }
 
@@ -51,8 +55,9 @@ export function sortTodaysFocusTasks(
   tasks: PlannerTask[],
   todayKey: string
 ): PlannerTask[] {
+  // Exclude public holidays from focus tasks
   return tasks
-    .filter((t) => t.dueDate === todayKey)
+    .filter((t) => !isHolidayItem(t) && t.dueDate === todayKey)
     .sort((a, b) => {
       // 1. Pinned tasks stay prominently at the top
       const aPinned = a.isPinned ? 1 : 0;
@@ -85,6 +90,7 @@ export interface UpcomingDateGroup {
   weekday: string;
   isWeekend: boolean;
   tasks: PlannerTask[];
+  events: PlannerTask[];
 }
 
 export interface UpcomingSummary {
@@ -104,10 +110,10 @@ export function getUpcomingDateGroups(
   const [y, m, d] = todayKey.split("-").map(Number);
   const baseDate = new Date(y, m - 1, d);
 
-  // Overdue tasks
-  const overdueTasks = tasks.filter(
-    (t) => Boolean(t.dueDate && t.dueDate < todayKey)
-  ).sort((a, b) => (a.dueDate ?? "").localeCompare(b.dueDate ?? ""));
+  // Overdue tasks: ONLY genuine tasks that are not completed and whose dueDate < todayKey
+  const overdueTasks = tasks
+    .filter((t) => isTaskItem(t) && t.status !== "completed" && Boolean(t.dueDate && t.dueDate < todayKey))
+    .sort((a, b) => (a.dueDate ?? "").localeCompare(b.dueDate ?? ""));
 
   const dateGroups: UpcomingDateGroup[] = [];
   let totalUpcomingCount = 0;
@@ -130,12 +136,21 @@ export function getUpcomingDateGroups(
     }
 
     const dayTasks = tasks
-      .filter((t) => t.dueDate === dateKey)
+      .filter((t) => isTaskItem(t) && t.dueDate === dateKey)
       .sort((a, b) => {
         const pA = PRIORITY_WEIGHTS[a.priority ?? "none"] ?? 5;
         const pB = PRIORITY_WEIGHTS[b.priority ?? "none"] ?? 5;
         if (pA !== pB) return pA - pB;
         return (a.dueTime ?? "99:99").localeCompare(b.dueTime ?? "99:99");
+      });
+
+    const dayEvents = tasks
+      .filter((t) => !isTaskItem(t) && t.dueDate === dateKey)
+      .sort((a, b) => {
+        const aHol = a.isHoliday ? 1 : 0;
+        const bHol = b.isHoliday ? 1 : 0;
+        if (aHol !== bHol) return bHol - aHol;
+        return (a.dueTime ?? "00:00").localeCompare(b.dueTime ?? "00:00");
       });
 
     totalUpcomingCount += dayTasks.length;
@@ -145,6 +160,7 @@ export function getUpcomingDateGroups(
       weekday,
       isWeekend,
       tasks: dayTasks,
+      events: dayEvents,
     });
   }
 
@@ -192,7 +208,7 @@ export function calculateWeeklyProgress(
   const weekDateKeys = new Set(weekDays.map(toDateKey));
 
   const weekTasks = tasks.filter(
-    (t) => t.dueDate && weekDateKeys.has(t.dueDate)
+    (t) => isTaskItem(t) && t.dueDate && weekDateKeys.has(t.dueDate)
   );
   const tasksCompleted = weekTasks.filter((t) => t.status === "completed").length;
   const tasksRemaining = weekTasks.length - tasksCompleted;
@@ -203,7 +219,7 @@ export function calculateWeeklyProgress(
     const dateKey = toDateKey(dayDate);
     const dayName = dayDate.toLocaleDateString("en", { weekday: "narrow" });
     const dayShort = dayDate.toLocaleDateString("en", { weekday: "short" });
-    const dayTasks = tasks.filter((t) => t.dueDate === dateKey);
+    const dayTasks = tasks.filter((t) => isTaskItem(t) && t.dueDate === dateKey);
     const dayCompleted = dayTasks.filter((t) => t.status === "completed").length;
     const totalTasks = dayTasks.length;
     const completionPercent =

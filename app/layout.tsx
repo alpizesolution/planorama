@@ -8,7 +8,7 @@ import "@fontsource/lexend/700.css";
 import "./globals.css";
 
 export const metadata: Metadata = { title: "Planorama — Your whole year, in view", description: "A colorful, flexible planner for your tasks, calendar, and everyday plans.", applicationName: "Planorama", manifest: "/manifest.webmanifest" };
-export const viewport: Viewport = { themeColor: "#fff4e2", width: "device-width", initialScale: 1 };
+export const viewport: Viewport = { themeColor: "#fff4e2", width: "device-width", initialScale: 1, viewportFit: "cover" };
 
 // Inline script that runs before React hydration to evict stale Vite/workbox
 // service workers that can block the Next.js app from loading properly.

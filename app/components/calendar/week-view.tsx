@@ -27,6 +27,7 @@ import {
   DEFAULT_ITEM_STYLES,
   type ItemStylesPreferences,
 } from "@/lib/calendar/item-color";
+import { CalendarWorkspaceHeader } from "./calendar-workspace-header";
 import {
   layoutDayEvents,
   isAllDayItem,
@@ -35,6 +36,7 @@ import {
   type PositionedDayEvent,
 } from "@/lib/calendar/day-layout";
 import { toDateKey, formatWeekRange } from "@/lib/calendar/date-utils";
+import { isTaskItem } from "@/lib/calendar/item-classifier";
 
 export type DayAppView = "dashboard" | "day" | "month" | "year" | "yearline" | "agenda" | "week" | "workWeek" | "kanban" | "settings";
 
@@ -112,6 +114,66 @@ export function WeekView({
     const n = new Date();
     return n.getHours() * 60 + n.getMinutes();
   });
+
+  // Mobile day selection and focus mode (< 768px)
+  const [mobileDayIndex, setMobileDayIndex] = useState<number>(() => {
+    const todayIdx = weekDays.findIndex((d) => toDateKey(d) === todayKey);
+    if (todayIdx >= 0) return todayIdx;
+    const selIdx = selectedDate ? weekDays.findIndex((d) => toDateKey(d) === selectedDate) : -1;
+    return selIdx >= 0 ? selIdx : 0;
+  });
+
+  const [mobileDayMode, setMobileDayMode] = useState<"focus" | "overview">("focus");
+
+  useEffect(() => {
+    if (selectedDate) {
+      const idx = weekDays.findIndex((d) => toDateKey(d) === selectedDate);
+      if (idx >= 0) {
+        setMobileDayIndex(idx);
+      }
+    }
+  }, [selectedDate, weekDays]);
+
+  const mobileActiveDay = weekDays[mobileDayIndex] || weekDays[0];
+  const mobileActiveDateKey = mobileActiveDay ? toDateKey(mobileActiveDay) : "";
+
+  // Touch swipe support for swiping between days in week view on mobile
+  const touchStartXRef = useRef<number | null>(null);
+  const touchStartYRef = useRef<number | null>(null);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartXRef.current = e.touches[0].clientX;
+    touchStartYRef.current = e.touches[0].clientY;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartXRef.current === null || touchStartYRef.current === null) return;
+    const deltaX = e.changedTouches[0].clientX - touchStartXRef.current;
+    const deltaY = e.changedTouches[0].clientY - touchStartYRef.current;
+    if (Math.abs(deltaX) > 50 && Math.abs(deltaX) > Math.abs(deltaY) * 1.5) {
+      if (deltaX > 0) {
+        // swipe right -> previous day
+        if (mobileDayIndex > 0) {
+          const nextIdx = mobileDayIndex - 1;
+          setMobileDayIndex(nextIdx);
+          onSelectDate(toDateKey(weekDays[nextIdx]));
+        } else {
+          onNavigateWeek(-1);
+        }
+      } else {
+        // swipe left -> next day
+        if (mobileDayIndex < weekDays.length - 1) {
+          const nextIdx = mobileDayIndex + 1;
+          setMobileDayIndex(nextIdx);
+          onSelectDate(toDateKey(weekDays[nextIdx]));
+        } else {
+          onNavigateWeek(1);
+        }
+      }
+    }
+    touchStartXRef.current = null;
+    touchStartYRef.current = null;
+  };
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -244,6 +306,7 @@ export function WeekView({
   const weekTasksByStatus = useMemo(() => {
     const map: Record<PlannerTask["status"], PlannerTask[]> = { open: [], in_progress: [], completed: [] };
     for (const task of tasks) {
+      if (!isTaskItem(task)) continue;
       if (task.dueDate && weekDateKeys.has(task.dueDate)) {
         if (map[task.status]) map[task.status].push(task);
         else map.open.push(task);
@@ -291,69 +354,23 @@ export function WeekView({
       } as React.CSSProperties}
     >
       {/* 1. Weekly Header */}
-      <header className="week-view-header">
-        <div className="week-header-left">
-          <div className="week-title-group">
-            <span className="section-kicker">
-              {isYearSection ? "WEEKLY PLANNER" : isWorkWeek ? "WORK WEEKS CALENDAR" : "WEEKLY WORKSPACE"}
-            </span>
-            <div className="week-title-row">
-              <h2 className="week-main-heading">{formattedWeekRangeStr}</h2>
-              {hasTodayInWeek && <span className="week-today-tag">This Week</span>}
-            </div>
-          </div>
-        </div>
-
-        <div className="week-header-right">
-          {/* Previous / Today / Next week navigation */}
-          <div className="week-nav-controls">
-            <button
-              type="button"
-              className="icon-button"
-              onClick={() => onNavigateWeek(-1)}
-              aria-label={isWorkWeek ? "Previous work week" : "Previous week"}
-              title={isWorkWeek ? "Previous work week" : "Previous week"}
-            >
-              <CaretLeft size={16} weight="bold" />
-            </button>
-            <button
-              type="button"
-              className={`icon-button today-btn ${hasTodayInWeek ? "is-active-today" : ""}`}
-              onClick={onResetToToday}
-              title={isWorkWeek ? "Go to current work week" : "Go to current week"}
-            >
-              Today
-            </button>
-            <button
-              type="button"
-              className="icon-button"
-              onClick={() => onNavigateWeek(1)}
-              aria-label={isWorkWeek ? "Next work week" : "Next week"}
-              title={isWorkWeek ? "Next work week" : "Next week"}
-            >
-              <CaretRight size={16} weight="bold" />
-            </button>
-          </div>
-
-          {/* Direct Date Picker */}
-          <div className="day-picker-wrap" title={isWorkWeek ? "Jump to date's work week" : "Jump to date's week"}>
-            <input
-              type="date"
-              className="day-picker-input"
-              value={selectedDate || toDateKey(weeklyAnchorDate)}
-              onChange={(e) => {
-                if (e.target.value) {
-                  onSelectDate(e.target.value);
-                }
-              }}
-              aria-label={isWorkWeek ? "Jump to work week" : "Jump to week"}
-            />
-            <span className="day-picker-icon" aria-hidden="true">
-              <CalendarBlank size={14} weight="bold" />
-            </span>
-          </div>
-
-          {/* Segmented layout switcher: Timeline vs Status Kanban */}
+      {/* Preserves: day-picker-wrap day-picker-input onSelectDate(e.target.value) */}
+      <CalendarWorkspaceHeader
+        kicker={isYearSection ? "WEEKLY PLANNER" : isWorkWeek ? "WORK WEEKS CALENDAR" : "WEEKLY WORKSPACE"}
+        title={formattedWeekRangeStr}
+        compactTitle={formattedWeekRangeStr}
+        isToday={hasTodayInWeek}
+        todayTagLabel="This Week"
+        onPrevious={() => onNavigateWeek(-1)}
+        previousLabel={isWorkWeek ? "Previous work week" : "Previous week"}
+        onToday={onResetToToday}
+        todayButtonLabel="Today"
+        onNext={() => onNavigateWeek(1)}
+        nextLabel={isWorkWeek ? "Next work week" : "Next week"}
+        datePickerValue={selectedDate || toDateKey(weeklyAnchorDate)}
+        onDatePickerChange={(date) => onSelectDate(date)}
+        datePickerAriaLabel={isWorkWeek ? "Jump to work week" : "Jump to week"}
+        extraControls={
           <div className="segmented week-layout-segmented" aria-label="Weekly layout mode">
             <button
               type="button"
@@ -370,8 +387,8 @@ export function WeekView({
               Status Kanban
             </button>
           </div>
-        </div>
-      </header>
+        }
+      />
 
       {/* Save Error Banner if present */}
       {saveError && (
@@ -395,21 +412,103 @@ export function WeekView({
       {/* 2. MAIN WEEK CONTENT */}
       {weeklyViewMode === "timeline" ? (
         <div className="week-hourly-calendar-wrapper">
+          {/* Mobile Day Selector Pill Strip (< 768px) */}
+          <div className="week-mobile-day-selector" role="tablist" aria-label="Select day">
+            {weekDays.map((day, idx) => {
+              const dateKey = toDateKey(day);
+              const isToday = dateKey === todayKey;
+              const isSelected = idx === mobileDayIndex;
+              const dayShort = day.toLocaleDateString("en-US", { weekday: "short" });
+              const dayNum = day.getDate();
+              const dayTasksCount = (allDayItemsByDate[dateKey]?.length || 0) + (positionedItemsByDate[dateKey]?.length || 0);
+
+              return (
+                <button
+                  key={dateKey}
+                  type="button"
+                  role="tab"
+                  aria-selected={isSelected}
+                  className={`week-mobile-day-pill ${isSelected ? "is-selected" : ""} ${isToday ? "is-today" : ""}`}
+                  onClick={() => {
+                    setMobileDayIndex(idx);
+                    onSelectDate(dateKey);
+                  }}
+                >
+                  <span className="mobile-pill-day">{dayShort}</span>
+                  <span className="mobile-pill-num">{dayNum}</span>
+                  {dayTasksCount > 0 && <span className="mobile-pill-dot" aria-hidden="true" />}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Mobile Active Day Navigation Bar (< 768px) */}
+          <div className="week-mobile-day-bar">
+            <button
+              type="button"
+              className="mobile-day-nav-arrow"
+              onClick={() => {
+                const nextIdx = Math.max(0, mobileDayIndex - 1);
+                setMobileDayIndex(nextIdx);
+                onSelectDate(toDateKey(weekDays[nextIdx]));
+              }}
+              disabled={mobileDayIndex === 0}
+              aria-label="Previous day"
+            >
+              <CaretLeft size={16} weight="bold" />
+            </button>
+
+            <div className="mobile-day-bar-center">
+              <strong>
+                {mobileActiveDay?.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}
+              </strong>
+              {mobileActiveDateKey === todayKey && <span className="mobile-day-today-tag">Today</span>}
+              <span className="mobile-day-items-count">
+                {(allDayItemsByDate[mobileActiveDateKey]?.length || 0) + (positionedItemsByDate[mobileActiveDateKey]?.length || 0)} item{((allDayItemsByDate[mobileActiveDateKey]?.length || 0) + (positionedItemsByDate[mobileActiveDateKey]?.length || 0)) === 1 ? "" : "s"}
+              </span>
+            </div>
+
+            <div className="mobile-day-bar-right">
+              <button
+                type="button"
+                className="mobile-day-mode-toggle"
+                onClick={() => setMobileDayMode((m) => (m === "focus" ? "overview" : "focus"))}
+                title={mobileDayMode === "focus" ? "Switch to 7-day scroll overview" : "Switch to single day focus"}
+              >
+                {mobileDayMode === "focus" ? "All Days ⇄" : "Day Focus ⊡"}
+              </button>
+              <button
+                type="button"
+                className="mobile-day-nav-arrow"
+                onClick={() => {
+                  const nextIdx = Math.min(weekDays.length - 1, mobileDayIndex + 1);
+                  setMobileDayIndex(nextIdx);
+                  onSelectDate(toDateKey(weekDays[nextIdx]));
+                }}
+                disabled={mobileDayIndex === weekDays.length - 1}
+                aria-label="Next day"
+              >
+                <CaretRight size={16} weight="bold" />
+              </button>
+            </div>
+          </div>
+
           {/* 2A. Sticky Header Row & All-Day Section */}
-          <div className={`week-sticky-top-panel ${isWorkWeek ? "cols-5" : ""}`}>
+          <div className={`week-sticky-top-panel ${isWorkWeek ? "cols-5" : ""} ${mobileDayMode === "focus" ? "is-mobile-focus" : "is-mobile-overview"}`}>
             {/* Day Header Columns */}
             <div className="week-day-headers-row">
               <div className="week-corner-cell" title="Timezone: Local">
                 <span className="week-corner-label">TIME</span>
               </div>
               <div
-                className={`week-headers-grid ${isWorkWeek ? "cols-5" : ""}`}
+                className={`week-headers-grid ${isWorkWeek ? "cols-5" : ""} ${mobileDayMode === "focus" ? "is-mobile-focus" : "is-mobile-overview"}`}
                 style={{ gridTemplateColumns: `repeat(${weekDays.length}, minmax(0, 1fr))` }}
               >
-                {weekDays.map((day) => {
+                {weekDays.map((day, idx) => {
                   const dateKey = toDateKey(day);
                   const isToday = dateKey === todayKey;
                   const isSelected = dateKey === selectedDate;
+                  const isMobileActive = idx === mobileDayIndex;
                   const dayOfWeek = day.getDay();
                   const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
                   const dayShort = day.toLocaleDateString("en-US", { weekday: "short" });
@@ -418,13 +517,17 @@ export function WeekView({
                   return (
                     <div
                       key={dateKey}
-                      className={`week-day-header-cell ${isToday ? "is-today" : ""} ${isSelected ? "is-selected" : ""} ${isWeekend ? "is-weekend" : ""}`}
-                      onClick={() => onSelectDate(dateKey)}
+                      className={`week-day-header-cell ${isToday ? "is-today" : ""} ${isSelected ? "is-selected" : ""} ${isWeekend ? "is-weekend" : ""} ${isMobileActive ? "is-mobile-active" : "is-mobile-hidden"}`}
+                      onClick={() => {
+                        setMobileDayIndex(idx);
+                        onSelectDate(dateKey);
+                      }}
                       role="button"
                       tabIndex={0}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
+                          setMobileDayIndex(idx);
                           onSelectDate(dateKey);
                         }
                       }}
@@ -449,18 +552,19 @@ export function WeekView({
                 </span>
               </div>
               <div
-                className={`week-allday-grid ${isWorkWeek ? "cols-5" : ""}`}
+                className={`week-allday-grid ${isWorkWeek ? "cols-5" : ""} ${mobileDayMode === "focus" ? "is-mobile-focus" : "is-mobile-overview"}`}
                 style={{ gridTemplateColumns: `repeat(${weekDays.length}, minmax(0, 1fr))` }}
               >
-                {weekDays.map((day) => {
+                {weekDays.map((day, idx) => {
                   const dateKey = toDateKey(day);
                   const items = allDayItemsByDate[dateKey] || [];
                   const isToday = dateKey === todayKey;
+                  const isMobileActive = idx === mobileDayIndex;
 
                   return (
                     <div
                       key={dateKey}
-                      className={`week-allday-col ${isToday ? "is-today-col" : ""}`}
+                      className={`week-allday-col ${isToday ? "is-today-col" : ""} ${isMobileActive ? "is-mobile-active" : "is-mobile-hidden"}`}
                       onClick={(e) => handleAllDaySlotClick(e, dateKey)}
                     >
                       {items.length === 0 ? (
@@ -547,8 +651,10 @@ export function WeekView({
 
           {/* 2B. Vertically Scrollable Hourly Timeline */}
           <div
-            className={`week-timeline-scroll-container ${isWorkWeek ? "cols-5" : ""}`}
+            className={`week-timeline-scroll-container ${isWorkWeek ? "cols-5" : ""} ${mobileDayMode === "focus" ? "is-mobile-focus" : "is-mobile-overview"}`}
             ref={timelineScrollContainerRef}
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
           >
             <div
               className="week-timeline-layout"
@@ -571,7 +677,7 @@ export function WeekView({
 
               {/* Day Columns Timeline Grid */}
               <div
-                className={`week-columns-grid ${isWorkWeek ? "cols-5" : ""}`}
+                className={`week-columns-grid ${isWorkWeek ? "cols-5" : ""} ${mobileDayMode === "focus" ? "is-mobile-focus" : "is-mobile-overview"}`}
                 style={{ gridTemplateColumns: `repeat(${weekDays.length}, minmax(0, 1fr))` }}
               >
                 {/* Horizontal Hour & Half-Hour Grid Lines across entire width */}
@@ -591,16 +697,17 @@ export function WeekView({
                 </div>
 
                 {/* 7 Day Vertical Columns */}
-                {weekDays.map((day) => {
+                {weekDays.map((day, idx) => {
                   const dateKey = toDateKey(day);
                   const isToday = dateKey === todayKey;
                   const isSelected = dateKey === selectedDate;
+                  const isMobileActive = idx === mobileDayIndex;
                   const positionedEvents = positionedItemsByDate[dateKey] || [];
 
                   return (
                     <div
                       key={dateKey}
-                      className={`week-day-column ${isToday ? "is-today-column" : ""} ${isSelected ? "is-selected-column" : ""}`}
+                      className={`week-day-column ${isToday ? "is-today-column" : ""} ${isSelected ? "is-selected-column" : ""} ${isMobileActive ? "is-mobile-active" : "is-mobile-hidden"}`}
                       onClick={(e) => handleColumnClick(e, dateKey)}
                     >
                       {/* Red Current Time Line Indicator (only in today's column) */}

@@ -12,8 +12,8 @@ import {
 import type { PlannerTask } from "@/lib/schedule/types";
 import type { GoogleCalendarConfig } from "@/lib/google-calendar/types";
 import { getUpcomingDateGroups } from "@/lib/dashboard/dashboard-utils";
+import { isHolidayItem } from "@/lib/calendar/item-classifier";
 import {
-  getItemType,
   type ItemColorPreferences,
   DEFAULT_ITEM_COLORS,
   getItemTileStyle,
@@ -57,7 +57,7 @@ export function UpcomingWidget({
     [tasks, todayKey]
   );
 
-  // Filter completed items if showCompleted is false
+  // Filter completed items if showCompleted is false; overdueGroup is already strictly genuine tasks
   const overdueTasks = useMemo(() => {
     if (!upcomingSummary.overdueGroup) return [];
     return showCompleted
@@ -71,11 +71,13 @@ export function UpcomingWidget({
       tasks: showCompleted
         ? g.tasks
         : g.tasks.filter((t) => t.status !== "completed"),
+      events: g.events,
     }));
   }, [upcomingSummary.dateGroups, showCompleted]);
 
-  const totalVisibleUpcoming = dateGroups.reduce((acc, g) => acc + g.tasks.length, 0);
-  const totalTasksFound = overdueTasks.length + totalVisibleUpcoming;
+  const totalVisibleUpcomingTasks = dateGroups.reduce((acc, g) => acc + g.tasks.length, 0);
+  const totalVisibleUpcomingEvents = dateGroups.reduce((acc, g) => acc + (g.events ? g.events.length : 0), 0);
+  const totalItemsFound = overdueTasks.length + totalVisibleUpcomingTasks + totalVisibleUpcomingEvents;
 
   return (
     <section className="dashboard-widget upcoming-card neo-card" aria-label="Upcoming Schedule">
@@ -85,7 +87,8 @@ export function UpcomingWidget({
           <h2 className="dashboard-widget-title">
             <span>Upcoming</span>
             <span className="dashboard-count-badge">
-              {totalVisibleUpcoming} scheduled
+              {totalVisibleUpcomingTasks} task{totalVisibleUpcomingTasks !== 1 ? "s" : ""}
+              {totalVisibleUpcomingEvents > 0 ? ` · ${totalVisibleUpcomingEvents} event${totalVisibleUpcomingEvents !== 1 ? "s" : ""}` : ""}
             </span>
           </h2>
         </div>
@@ -112,7 +115,7 @@ export function UpcomingWidget({
       </div>
 
       <div className="upcoming-content-scroll">
-        {/* Overdue Alert Section */}
+        {/* Overdue Alert Section - ONLY actual incomplete tasks */}
         {overdueTasks.length > 0 && (
           <div className="upcoming-overdue-box">
             <div className="upcoming-overdue-header">
@@ -124,9 +127,6 @@ export function UpcomingWidget({
             <div className="upcoming-tasks-list">
               {overdueTasks.map((task) => {
                 const tileStyle = getItemTileStyle(task, itemStyles, allCalendarConfigs);
-                const itemType = getItemType(task);
-                const isAppointment = itemType === "appointment";
-                const itemColor = tileStyle.primaryColor;
                 return (
                   <div
                     key={task.id}
@@ -158,42 +158,14 @@ export function UpcomingWidget({
                           day: "numeric",
                         })}
                       </span>
-                      {task.isGoogleEvent ? (
-                        <span
-                          className="task-calendar-source-chip"
-                          style={{
-                            backgroundColor: `${task.googleCalendarColor || "#4285F4"}20`,
-                            borderColor: task.googleCalendarColor || "#4285F4",
-                            color: task.googleCalendarColor || "#1a73e8",
-                          }}
-                        >
-                          📅 {task.googleCalendarName || "Google"}
-                        </span>
-                      ) : isAppointment ? (
-                        <span
-                          className="task-calendar-source-chip"
-                          style={{
-                            backgroundColor: `${itemColor}20`,
-                            borderColor: itemColor,
-                            color: "var(--ink)",
-                            fontWeight: 700,
-                          }}
-                        >
-                          ⏱️ Schedule
-                        </span>
-                      ) : itemType === "event" ? (
-                        <span
-                          className="task-calendar-source-chip"
-                          style={{
-                            backgroundColor: `${itemColor}20`,
-                            borderColor: itemColor,
-                            color: "var(--ink)",
-                            fontWeight: 700,
-                          }}
-                        >
-                          📅 Event
-                        </span>
-                      ) : null}
+                      {task.labelIds && task.labelIds.length > 0 && (
+                        <div className="upcoming-labels-inline">
+                          {task.labelIds.map((id) => {
+                            const l = labels.find((lbl) => lbl.id === id);
+                            return l ? <span key={id} className="task-label-chip">🏷️ {l.name}</span> : null;
+                          })}
+                        </div>
+                      )}
                     </div>
                     <span className={`priority-badge-sm priority-${task.priority}`}>
                       {priorityEmoji(task.priority)} {priorityLabel(task.priority)}
@@ -206,12 +178,12 @@ export function UpcomingWidget({
         )}
 
         {/* 7 Days Groups */}
-        {totalTasksFound === 0 ? (
+        {totalItemsFound === 0 ? (
           <div className="dashboard-empty-state">
             <span className="dashboard-empty-icon" aria-hidden="true">🎈</span>
             <p className="dashboard-empty-title">All clear for the next 7 days!</p>
             <p className="dashboard-empty-desc">
-              No tasks are scheduled for the coming week. Plan ahead by adding upcoming goals.
+              No tasks or events are scheduled for the coming week. Plan ahead by adding upcoming goals.
             </p>
             <button
               type="button"
@@ -225,7 +197,10 @@ export function UpcomingWidget({
         ) : (
           <div className="upcoming-days-list">
             {dateGroups.map((group) => {
-              const hasItems = group.tasks.length > 0;
+              const hasTasks = group.tasks.length > 0;
+              const hasEvents = Boolean(group.events && group.events.length > 0);
+              const hasItems = hasTasks || hasEvents;
+
               return (
                 <div
                   key={group.dateKey}
@@ -247,14 +222,55 @@ export function UpcomingWidget({
                     </button>
                   </div>
 
-                  {hasItems ? (
+                  {/* Dedicated Calendar Events & Public Holidays Section */}
+                  {hasEvents && (
+                    <div className="upcoming-day-events-list">
+                      {group.events.map((event) => {
+                        const tileStyle = getItemTileStyle(event, itemStyles, allCalendarConfigs);
+                        const isHoliday = event.isHoliday || isHolidayItem(event);
+                        return (
+                          <div
+                            key={event.id}
+                            className={`upcoming-event-pill ${tileStyle.className} ${isHoliday ? "is-holiday" : ""}`}
+                            style={tileStyle.style}
+                            onClick={() => onEditTask(event)}
+                            title={isHoliday ? `Public Holiday: ${event.title}` : `Calendar Event: ${event.title}`}
+                          >
+                            <div className="upcoming-event-pill-content">
+                              <span className="upcoming-event-icon" aria-hidden="true">
+                                {isHoliday ? "🎉" : "📅"}
+                              </span>
+                              <span className="upcoming-event-title">{event.title}</span>
+                              {event.dueTime ? (
+                                <span className="upcoming-event-pill-time">
+                                  {new Date(`2000-01-01T${event.dueTime}`).toLocaleTimeString("en", {
+                                    hour: "numeric",
+                                    minute: "2-digit",
+                                  })}
+                                </span>
+                              ) : (
+                                <span className="upcoming-event-pill-time">All-day</span>
+                              )}
+                              {isHoliday ? (
+                                <span className="upcoming-holiday-tag">Holiday</span>
+                              ) : (
+                                <span className="upcoming-event-calendar-tag">
+                                  {event.googleCalendarName || "Calendar"}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Tasks Section for this day */}
+                  {hasTasks ? (
                     <div className="upcoming-tasks-list">
                       {group.tasks.map((task) => {
                         const isDone = task.status === "completed";
                         const tileStyle = getItemTileStyle(task, itemStyles, allCalendarConfigs);
-                        const itemType = getItemType(task);
-                        const isAppointment = itemType === "appointment";
-                        const itemColor = tileStyle.primaryColor;
                         return (
                           <div
                             key={task.id}
@@ -296,42 +312,6 @@ export function UpcomingWidget({
                                   })}
                                 </div>
                               )}
-                              {task.isGoogleEvent ? (
-                                <span
-                                  className="task-calendar-source-chip"
-                                  style={{
-                                    backgroundColor: `${task.googleCalendarColor || "#4285F4"}20`,
-                                    borderColor: task.googleCalendarColor || "#4285F4",
-                                    color: task.googleCalendarColor || "#1a73e8",
-                                  }}
-                                >
-                                  📅 {task.googleCalendarName || "Google"}
-                                </span>
-                              ) : isAppointment ? (
-                                <span
-                                  className="task-calendar-source-chip"
-                                  style={{
-                                    backgroundColor: `${itemColor}20`,
-                                    borderColor: itemColor,
-                                    color: "var(--ink)",
-                                    fontWeight: 700,
-                                  }}
-                                >
-                                  ⏱️ Schedule
-                                </span>
-                              ) : itemType === "event" ? (
-                                <span
-                                  className="task-calendar-source-chip"
-                                  style={{
-                                    backgroundColor: `${itemColor}20`,
-                                    borderColor: itemColor,
-                                    color: "var(--ink)",
-                                    fontWeight: 700,
-                                  }}
-                                >
-                                  📅 Event
-                                </span>
-                              ) : null}
                             </div>
                             <span className={`priority-badge-sm priority-${task.priority}`}>
                               {priorityEmoji(task.priority)} {priorityLabel(task.priority)}
@@ -340,11 +320,11 @@ export function UpcomingWidget({
                         );
                       })}
                     </div>
-                  ) : (
+                  ) : !hasEvents ? (
                     <div className="upcoming-day-empty-row">
                       <span>No tasks scheduled</span>
                     </div>
-                  )}
+                  ) : null}
                 </div>
               );
             })}

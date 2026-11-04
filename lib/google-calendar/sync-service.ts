@@ -17,6 +17,10 @@ import {
   isEventTombstoned,
   resolveEventConflict,
 } from "./sync-queue";
+import {
+  isHolidayCalendar,
+  isHolidayGoogleEvent,
+} from "../calendar/item-classifier";
 
 /**
  * Extracts a "YYYY-MM-DD" date key from a GoogleEventDateTime object.
@@ -72,6 +76,9 @@ export function googleEventToPlannerTask(
   calendar: GoogleCalendarConfig,
   existingTask?: PlannerTask
 ): PlannerTask {
+  const now = new Date().toISOString();
+  const accountPrefix = calendar.accountId ? `${calendar.accountId.slice(0, 8)}-` : "";
+  const taskId = existingTask?.id || `gcal-${accountPrefix}${calendar.id.slice(0, 16)}-${event.id}`;
   const { dateKey, timeKey } = extractDateKeyFromGoogleDateTime(event.start);
   const isReadOnly = calendar.accessRole === "reader" || calendar.accessRole === "freeBusyReader";
   const isAvailabilityOnly = calendar.privacyMode === "availability_only" || event.visibility === "private";
@@ -99,9 +106,12 @@ export function googleEventToPlannerTask(
     location = undefined;
   }
 
-  const now = new Date().toISOString();
-  const accountPrefix = calendar.accountId ? `${calendar.accountId.slice(0, 8)}-` : "";
-  const taskId = existingTask?.id || `gcal-${accountPrefix}${calendar.id.slice(0, 16)}-${event.id}`;
+  const isHoliday = Boolean(
+    calendar.isHolidayCalendar ||
+    isHolidayCalendar(calendar) ||
+    isHolidayGoogleEvent(event, calendar) ||
+    existingTask?.isHoliday
+  );
 
   return {
     id: taskId,
@@ -125,6 +135,9 @@ export function googleEventToPlannerTask(
     googleCalendarColor: calendar.color,
     googleHtmlLink: event.htmlLink,
     isGoogleEvent: true,
+    isHoliday,
+    eventType: event.eventType || (isHoliday ? "holiday" : existingTask?.eventType || "default"),
+    itemType: "event",
     isReadOnlyCalendar: isReadOnly,
     isPrivateAvailabilityOnly: isAvailabilityOnly,
     googleETag: event.etag,
@@ -226,6 +239,45 @@ export async function disconnectGoogleAccount(accountId?: string): Promise<void>
     const errorData = await res.json().catch(() => ({}));
     throw new Error(errorData.error || "Failed to disconnect Google Calendar.");
   }
+}
+
+/**
+ * Assign or reset a custom display name for a connected Google Calendar account.
+ */
+export async function renameGoogleAccount(
+  accountId: string,
+  customDisplayName?: string | null
+): Promise<{ success: boolean; account?: { accountId: string; userEmail: string; customDisplayName?: string } }> {
+  const res = await fetch("/api/integrations/google/rename", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accountId, customDisplayName }),
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || "Failed to rename Google account.");
+  }
+  return res.json();
+}
+
+/**
+ * Assign or reset a custom display name for an individual Google Calendar.
+ */
+export async function renameGoogleCalendar(
+  calendarId: string,
+  customDisplayName?: string | null,
+  accountId?: string
+): Promise<{ success: boolean }> {
+  const res = await fetch("/api/integrations/google/rename", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ calendarId, customDisplayName, accountId }),
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || "Failed to rename calendar.");
+  }
+  return res.json();
 }
 
 /**

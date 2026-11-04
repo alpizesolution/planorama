@@ -1,6 +1,8 @@
 export interface GoogleCalendarConfig {
   id: string;
   name: string;
+  customDisplayName?: string;
+  accountCustomDisplayName?: string;
   description?: string;
   color: string;
   accessRole: "owner" | "writer" | "reader" | "freeBusyReader";
@@ -10,6 +12,7 @@ export interface GoogleCalendarConfig {
   privacyMode: "full_details" | "availability_only";
   accountId?: string;
   accountEmail?: string;
+  isHolidayCalendar?: boolean;
 }
 
 export interface ConnectedGoogleAccount {
@@ -19,6 +22,7 @@ export interface ConnectedGoogleAccount {
   userPicture?: string;
   isPrimary: boolean;
   connectedAt: string;
+  customDisplayName?: string;
 }
 
 export interface GoogleIntegrationStatus {

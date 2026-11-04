@@ -1,13 +1,29 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { ArrowClockwise, Gear, DotsSixVertical } from "@phosphor-icons/react";
+import { useMemo, useRef, useState, useEffect } from "react";
+import {
+  ArrowClockwise,
+  Gear,
+  DotsSixVertical,
+  ArrowsOutCardinal,
+} from "@phosphor-icons/react";
 import type { PlannerTask } from "@/lib/schedule/types";
 import type { Habit, HabitCheckIn } from "@/lib/habits/types";
 import type { ResolvedCalendarTheme } from "@/lib/calendar/calendar-themes";
-import type { DashboardWidgetConfig, DashboardWidgetId } from "@/lib/dashboard/types";
+import type {
+  DashboardWidgetConfig,
+  DashboardWidgetId,
+  DashboardWidgetWidth,
+  DashboardWidgetHeight,
+} from "@/lib/dashboard/types";
 import {
   DASHBOARD_WIDGET_METADATA,
+  WIDGET_HEIGHT_LABELS,
+  getWidgetColSpan,
+  calculateSnappedColSpan,
+  calculateSnappedWidgetWidth,
+  calculateSnappedWidgetHeight,
+  balanceDashboardLayout,
   resolveDashboardWidgets,
 } from "@/lib/dashboard/types";
 
@@ -21,6 +37,8 @@ import { DashboardCustomizationModal } from "./dashboard-customization-modal";
 
 import type { ItemColorPreferences, ItemStylesPreferences } from "@/lib/calendar/item-color";
 import type { GoogleCalendarConfig } from "@/lib/google-calendar/types";
+
+type ResizeDirection = "left" | "right" | "bottom" | "corner";
 
 interface DashboardViewProps {
   tasks: PlannerTask[];
@@ -84,6 +102,37 @@ export function DashboardView({
   const [directDraggedId, setDirectDraggedId] = useState<DashboardWidgetId | null>(null);
   const [directDragOverId, setDirectDragOverId] = useState<DashboardWidgetId | null>(null);
 
+  // Selection state for touch devices / click focus affordance
+  const [selectedWidgetId, setSelectedWidgetId] = useState<DashboardWidgetId | null>(null);
+
+  // Live active resizing state
+  const [resizingState, setResizingState] = useState<{
+    widgetId: DashboardWidgetId;
+    direction: ResizeDirection;
+    currentColSpan: number;
+    currentWidth: DashboardWidgetWidth;
+    currentHeight: DashboardWidgetHeight;
+  } | null>(null);
+
+  const gridRef = useRef<HTMLDivElement | null>(null);
+
+  // Ref to hold mutable drag session
+  const resizeSessionRef = useRef<{
+    widgetId: DashboardWidgetId;
+    direction: ResizeDirection;
+    startX: number;
+    startY: number;
+    startColSpan: number;
+    startWidth: DashboardWidgetWidth;
+    startHeight: DashboardWidgetHeight;
+    initialWidgetWidthPx: number;
+    initialWidgetHeightPx: number;
+    containerWidth: number;
+    currentColSpan: number;
+    currentWidth: DashboardWidgetWidth;
+    currentHeight: DashboardWidgetHeight;
+  } | null>(null);
+
   const resolvedWidgets = useMemo(() => {
     return resolveDashboardWidgets(widgetConfigs);
   }, [widgetConfigs]);
@@ -100,7 +149,21 @@ export function DashboardView({
     day: "numeric",
   });
 
-  // Direct widget drag-and-drop on the dashboard
+  // Clear selection on background click
+  useEffect(() => {
+    function handleDocumentClick(e: MouseEvent) {
+      const target = e.target as HTMLElement | null;
+      if (target && !target.closest(".dashboard-grid-item")) {
+        setSelectedWidgetId(null);
+      }
+    }
+    document.addEventListener("click", handleDocumentClick);
+    return () => {
+      document.removeEventListener("click", handleDocumentClick);
+    };
+  }, []);
+
+  // Direct widget drag-and-drop on the dashboard (Moving widgets)
   function handleDirectDragStart(id: DashboardWidgetId, e: React.DragEvent) {
     setDirectDraggedId(id);
     e.dataTransfer.effectAllowed = "move";
@@ -141,6 +204,162 @@ export function DashboardView({
   function handleDirectDragEnd() {
     setDirectDraggedId(null);
     setDirectDragOverId(null);
+  }
+
+  // Initiate interactive direct drag-to-resize
+  function handleResizeStart(
+    e: React.MouseEvent | React.TouchEvent,
+    widgetId: DashboardWidgetId,
+    direction: ResizeDirection
+  ) {
+    e.stopPropagation();
+    if ("preventDefault" in e && e.cancelable) {
+      e.preventDefault();
+    }
+
+    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+    const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
+
+    const targetWidget = resolvedWidgets.find((w) => w.id === widgetId);
+    if (!targetWidget) return;
+
+    const meta = DASHBOARD_WIDGET_METADATA[widgetId];
+    const initialColSpan = getWidgetColSpan(targetWidget);
+    const initialWidth = targetWidget.width || meta.defaultWidth;
+    const initialHeight = targetWidget.height || meta.defaultHeight;
+
+    const gridEl = gridRef.current;
+    const containerWidth = gridEl ? gridEl.getBoundingClientRect().width : window.innerWidth;
+
+    const widgetEl = document.querySelector(`.item-${widgetId.replace(/_/g, "-")}`) as HTMLElement | null;
+    const initialWidgetWidthPx = widgetEl ? widgetEl.getBoundingClientRect().width : (containerWidth * initialColSpan) / 12;
+    const initialWidgetHeightPx = widgetEl ? widgetEl.getBoundingClientRect().height : 360;
+
+    setSelectedWidgetId(widgetId);
+
+    const session = {
+      widgetId,
+      direction,
+      startX: clientX,
+      startY: clientY,
+      startColSpan: initialColSpan,
+      startWidth: initialWidth,
+      startHeight: initialHeight,
+      initialWidgetWidthPx,
+      initialWidgetHeightPx,
+      containerWidth,
+      currentColSpan: initialColSpan,
+      currentWidth: initialWidth,
+      currentHeight: initialHeight,
+    };
+
+    resizeSessionRef.current = session;
+    setResizingState({
+      widgetId,
+      direction,
+      currentColSpan: initialColSpan,
+      currentWidth: initialWidth,
+      currentHeight: initialHeight,
+    });
+
+    const cursor =
+      direction === "left" || direction === "right"
+        ? "col-resize"
+        : direction === "bottom"
+        ? "row-resize"
+        : "nwse-resize";
+
+    document.body.style.cursor = cursor;
+    document.body.style.userSelect = "none";
+
+    function onPointerMove(moveEvent: MouseEvent | TouchEvent) {
+      if (!resizeSessionRef.current) return;
+      const currentX = "touches" in moveEvent ? moveEvent.touches[0].clientX : moveEvent.clientX;
+      const currentY = "touches" in moveEvent ? moveEvent.touches[0].clientY : moveEvent.clientY;
+
+      const deltaX = currentX - resizeSessionRef.current.startX;
+      const deltaY = currentY - resizeSessionRef.current.startY;
+
+      const newColSpan = calculateSnappedColSpan(
+        meta,
+        resizeSessionRef.current.initialWidgetWidthPx,
+        deltaX,
+        direction,
+        resizeSessionRef.current.containerWidth
+      );
+
+      const newWidth = calculateSnappedWidgetWidth(
+        meta,
+        resizeSessionRef.current.initialWidgetWidthPx,
+        deltaX,
+        direction,
+        resizeSessionRef.current.containerWidth
+      );
+
+      const newHeight = calculateSnappedWidgetHeight(
+        meta,
+        resizeSessionRef.current.initialWidgetHeightPx,
+        deltaY,
+        direction
+      );
+
+      resizeSessionRef.current.currentColSpan = newColSpan;
+      resizeSessionRef.current.currentWidth = newWidth;
+      resizeSessionRef.current.currentHeight = newHeight;
+
+      setResizingState({
+        widgetId,
+        direction,
+        currentColSpan: newColSpan,
+        currentWidth: newWidth,
+        currentHeight: newHeight,
+      });
+    }
+
+    function onPointerEnd() {
+      window.removeEventListener("mousemove", onPointerMove);
+      window.removeEventListener("mouseup", onPointerEnd);
+      window.removeEventListener("touchmove", onPointerMove);
+      window.removeEventListener("touchend", onPointerEnd);
+      window.removeEventListener("touchcancel", onPointerEnd);
+
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+
+      const activeSession = resizeSessionRef.current;
+      resizeSessionRef.current = null;
+      setResizingState(null);
+
+      if (activeSession && onSaveWidgetConfigs) {
+        const hasChanged =
+          activeSession.currentColSpan !== activeSession.startColSpan ||
+          activeSession.currentWidth !== activeSession.startWidth ||
+          activeSession.currentHeight !== activeSession.startHeight;
+
+        if (hasChanged) {
+          const next = resolvedWidgets.map((item) =>
+            item.id === activeSession.widgetId
+              ? {
+                  ...item,
+                  colSpan: activeSession.currentColSpan,
+                  width: activeSession.currentWidth,
+                  height: activeSession.currentHeight,
+                }
+              : item
+          );
+          const balanced = balanceDashboardLayout(next);
+          onSaveWidgetConfigs(balanced);
+          const hMeta = WIDGET_HEIGHT_LABELS[activeSession.currentHeight];
+          showToast?.(`${meta.name}: ${activeSession.currentColSpan} Columns · ${hMeta.label}`);
+        }
+      }
+    }
+
+    window.addEventListener("mousemove", onPointerMove);
+    window.addEventListener("mouseup", onPointerEnd);
+    window.addEventListener("touchmove", onPointerMove, { passive: false });
+    window.addEventListener("touchend", onPointerEnd);
+    window.addEventListener("touchcancel", onPointerEnd);
   }
 
   const renderWidgetContent = (id: DashboardWidgetId) => {
@@ -234,29 +453,122 @@ export function DashboardView({
     const meta = DASHBOARD_WIDGET_METADATA[w.id];
     const isDragging = directDraggedId === w.id;
     const isDragOver = directDragOverId === w.id;
-    const itemClass = `dashboard-grid-item item-${w.id.replace(/_/g, "-")} ${
-      isDragging ? "is-direct-dragging" : ""
-    } ${isDragOver ? "is-direct-drag-over" : ""}`;
+    const isSelected = selectedWidgetId === w.id;
+
+    const isThisResizing = resizingState?.widgetId === w.id;
+    const colSpan = isThisResizing ? resizingState.currentColSpan : getWidgetColSpan(w);
+    const effectiveWidth = isThisResizing ? resizingState.currentWidth : (w.width || meta.defaultWidth);
+    const effectiveHeight = isThisResizing ? resizingState.currentHeight : (w.height || meta.defaultHeight);
+    const mobileHeight = w.mobileHeight || effectiveHeight;
+    const isMobileHidden = w.mobileVisible === false;
+
+    const isMinCols = colSpan === meta.minCols;
+    const isFullWidth = colSpan === 12;
+    const heightMeta = WIDGET_HEIGHT_LABELS[effectiveHeight];
+
+    const itemClass = [
+      "dashboard-grid-item",
+      `item-${w.id.replace(/_/g, "-")}`,
+      `item-cols-${colSpan}`,
+      `item-width-${effectiveWidth}`,
+      `item-height-${effectiveHeight}`,
+      `item-mobile-height-${mobileHeight}`,
+      isMobileHidden ? "is-mobile-hidden" : "",
+      isDragging ? "is-direct-dragging" : "",
+      isDragOver ? "is-direct-drag-over" : "",
+      isSelected ? "is-selected" : "",
+      isThisResizing ? "is-resizing" : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
 
     return (
       <div
         key={w.id}
         className={itemClass}
+        onClick={() => setSelectedWidgetId(w.id)}
         onDragOver={(e) => handleDirectDragOver(w.id, e)}
         onDrop={(e) => handleDirectDrop(w.id, e)}
       >
         <div className="dashboard-widget-wrapper">
-          <div
-            className="dashboard-widget-direct-handle"
-            draggable
-            onDragStart={(e) => handleDirectDragStart(w.id, e)}
-            onDragEnd={handleDirectDragEnd}
-            title={`Drag to rearrange ${meta.name} on dashboard`}
-            aria-label={`Drag to rearrange ${meta.name}`}
-          >
-            <DotsSixVertical size={15} weight="bold" />
-            <span className="direct-handle-text">Move</span>
+          {/* Top toolbar with clean Move handle only */}
+          <div className="dashboard-widget-top-controls">
+            <div
+              className="dashboard-widget-direct-handle"
+              draggable
+              onDragStart={(e) => handleDirectDragStart(w.id, e)}
+              onDragEnd={handleDirectDragEnd}
+              title={`Drag to rearrange ${meta.name} on dashboard`}
+              aria-label={`Drag to rearrange ${meta.name}`}
+            >
+              <DotsSixVertical size={14} weight="bold" />
+              <span className="direct-handle-text">Move</span>
+            </div>
           </div>
+
+          {/* Floating Live Dimension Indicator Badge while Resizing */}
+          {isThisResizing && (
+            <div
+              className="dashboard-resize-indicator-pill"
+              role="status"
+              aria-live="polite"
+            >
+              <span className="resize-indicator-icon">📐</span>
+              <span className="resize-indicator-text">
+                {colSpan} Columns {isMinCols ? "(Min width)" : isFullWidth ? "(Full width)" : `(${Math.round((colSpan / 12) * 100)}% row)`} · {heightMeta.label}
+              </span>
+            </div>
+          )}
+
+          {/* Left Edge Resize Handle (Only when horizontal resizing is permitted) */}
+          {meta.minCols < meta.maxCols && (
+            <div
+              className="dashboard-resize-handle resize-handle-left"
+              onMouseDown={(e) => handleResizeStart(e, w.id, "left")}
+              onTouchStart={(e) => handleResizeStart(e, w.id, "left")}
+              title={`Drag left edge to resize ${meta.name} width (Min ${meta.minCols} cols)`}
+              aria-label={`Drag left edge to resize ${meta.name} width`}
+            >
+              <div className="resize-handle-bar" />
+            </div>
+          )}
+
+          {/* Right Edge Resize Handle (Only when horizontal resizing is permitted) */}
+          {meta.minCols < meta.maxCols && (
+            <div
+              className="dashboard-resize-handle resize-handle-right"
+              onMouseDown={(e) => handleResizeStart(e, w.id, "right")}
+              onTouchStart={(e) => handleResizeStart(e, w.id, "right")}
+              title={`Drag right edge to resize ${meta.name} width (Min ${meta.minCols} cols)`}
+              aria-label={`Drag right edge to resize ${meta.name} width`}
+            >
+              <div className="resize-handle-bar" />
+            </div>
+          )}
+
+          {/* Bottom Edge Resize Handle */}
+          <div
+            className="dashboard-resize-handle resize-handle-bottom"
+            onMouseDown={(e) => handleResizeStart(e, w.id, "bottom")}
+            onTouchStart={(e) => handleResizeStart(e, w.id, "bottom")}
+            title={`Drag bottom edge to resize ${meta.name} height`}
+            aria-label={`Drag bottom edge to resize ${meta.name} height`}
+          >
+            <div className="resize-handle-bar-h" />
+          </div>
+
+          {/* Bottom-Right Corner Resize Handle */}
+          <div
+            className="dashboard-resize-handle resize-handle-corner"
+            onMouseDown={(e) => handleResizeStart(e, w.id, "corner")}
+            onTouchStart={(e) => handleResizeStart(e, w.id, "corner")}
+            title={`Drag corner to resize ${meta.name}`}
+            aria-label={`Drag corner to resize ${meta.name}`}
+          >
+            <ArrowsOutCardinal size={11} weight="bold" className="resize-corner-icon" />
+          </div>
+
+          {/* Actual Widget Content */}
           {renderWidgetContent(w.id)}
         </div>
       </div>
@@ -284,7 +596,7 @@ export function DashboardView({
             id="dashboard-customize-btn"
             className="dashboard-customize-btn neo-btn"
             onClick={() => setIsCustomizeModalOpen(true)}
-            title="Customize dashboard"
+            title="Customize dashboard visibility and order"
             aria-label="Customize dashboard"
           >
             <Gear size={16} weight="bold" />
@@ -321,12 +633,12 @@ export function DashboardView({
           </div>
         </div>
       ) : (
-        <div className="dashboard-widgets-grid">
+        <div className="dashboard-widgets-grid" ref={gridRef}>
           {activeWidgets.map((w) => renderGridItem(w))}
         </div>
       )}
 
-      {/* Dedicated Dashboard Customization Modal */}
+      {/* Dedicated Dashboard Customization Modal (Visibility & Reorder) */}
       <DashboardCustomizationModal
         isOpen={isCustomizeModalOpen}
         onClose={() => setIsCustomizeModalOpen(false)}
