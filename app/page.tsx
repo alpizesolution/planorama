@@ -2696,6 +2696,8 @@ export default function HomePage() {
               currentView={view}
               itemColors={preferences.itemColors ?? DEFAULT_ITEM_COLORS}
               itemStyles={preferences.itemStyles ?? DEFAULT_ITEM_STYLES}
+              habits={habits}
+              habitCheckIns={checkIns}
             />
           )}
 
