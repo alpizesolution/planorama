@@ -200,9 +200,9 @@ describe("Daily Workspace UI wiring", () => {
     expect(dayView).toContain("dateKey: currentDateKey");
   });
 
-  it("uses SVG rings without a charting dependency", () => {
-    expect(panel).toContain("<svg");
-    expect(panel).toContain("strokeDashoffset");
+  it("uses a progress bar without a charting dependency", () => {
+    expect(panel).toContain("dp-bar");
+    expect(panel).toContain("dp-bar-fill");
     expect(panel).not.toMatch(/from ["'](chart\.js|recharts|d3|apexcharts)/);
   });
 
