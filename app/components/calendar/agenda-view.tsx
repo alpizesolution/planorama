@@ -5,6 +5,7 @@ import { Plus, Lock, CalendarBlank, CheckCircle, Circle, Clock, CheckSquare, Mag
 import type { PlannerTask } from "@/lib/schedule/types";
 import type { GoogleCalendarConfig } from "@/lib/google-calendar/types";
 import type { ResolvedCalendarTheme } from "@/lib/calendar/calendar-themes";
+import { isHolidayItem } from "@/lib/calendar/item-classifier";
 import {
   getItemType,
   type ItemColorPreferences,
@@ -62,8 +63,9 @@ export function AgendaView({
   const [typeFilter, setTypeFilter] = useState<"all" | "event" | "task" | "appointment">("all");
 
   // Filter by selected date, type filter, and search query
+  // Holidays are excluded from the Agenda — they appear in the dedicated Holidays page
   const filteredTasks = useMemo(() => {
-    let list = tasks.filter((t) => t.dueDate);
+    let list = tasks.filter((t) => t.dueDate && !isHolidayItem(t));
     if (selectedDate) {
       list = list.filter((t) => t.dueDate === selectedDate);
     }
@@ -457,18 +459,22 @@ export function AgendaView({
                   </button>
                 </div>
               </>
-            ) : tasks.length === 0 && allTasksCount > 0 ? (
+            ) : tasks.filter((t) => !isHolidayItem(t)).length === 0 && allTasksCount > 0 ? (
               <>
                 <p className="empty-tasks">
                   No events or tasks match the currently enabled calendars.
                 </p>
                 <p className="agenda-empty-subtext">
                   Check calendar visibility checkboxes in the sidebar to display items.
+                  Public holidays are shown in the Holidays page.
                 </p>
               </>
             ) : (
               <>
                 <p className="empty-tasks">No upcoming tasks or events scheduled.</p>
+                <p className="agenda-empty-subtext">
+                  Public holidays are shown in the Holidays page.
+                </p>
                 <button
                   type="button"
                   className="agenda-add-task-header-btn"

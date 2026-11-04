@@ -38,7 +38,7 @@ import {
 import { toDateKey, formatWeekRange } from "@/lib/calendar/date-utils";
 import { isTaskItem } from "@/lib/calendar/item-classifier";
 
-export type DayAppView = "dashboard" | "day" | "month" | "year" | "yearline" | "agenda" | "week" | "workWeek" | "kanban" | "settings";
+export type DayAppView = "dashboard" | "day" | "month" | "year" | "yearline" | "agenda" | "week" | "workWeek" | "kanban" | "holidays" | "settings";
 
 export interface WeekViewProps {
   weekDays: Date[];

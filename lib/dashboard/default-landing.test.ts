@@ -143,7 +143,7 @@ describe("PLANORAMA Default Landing Page & View Navigation Routing", () => {
 
   describe("5. Navigation Bar & Sidebar Active State (Requirement 6)", () => {
     it("includes Dashboard in NAV_VIEWS as the first entry", () => {
-      expect(NAV_VIEWS.length).toBe(9);
+      expect(NAV_VIEWS.length).toBe(10);
       expect(NAV_VIEWS[0]).toEqual({ id: "dashboard", label: "Dashboard" });
     });
 
@@ -212,7 +212,7 @@ describe("PLANORAMA Default Landing Page & View Navigation Routing", () => {
   });
 
   describe("7. Preservation of All Planner Views (Requirement 8)", () => {
-    it("retains all 9 planner/workspace views in NAV_VIEWS without omissions", () => {
+    it("retains all 10 planner/workspace views in NAV_VIEWS without omissions", () => {
       const expectedIds = [
         "dashboard",
         "day",
@@ -223,6 +223,7 @@ describe("PLANORAMA Default Landing Page & View Navigation Routing", () => {
         "yearline",
         "agenda",
         "kanban",
+        "holidays",
       ];
       expect(NAV_VIEWS.map((v) => v.id)).toEqual(expectedIds);
     });
