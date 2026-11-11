@@ -2,11 +2,13 @@
 
 import { useMemo, useState } from "react";
 import {
+  ArrowsClockwise,
   CaretLeft,
   CaretRight,
   MagnifyingGlass,
   CalendarBlank,
   Sun,
+  Warning,
   X,
 } from "@phosphor-icons/react";
 import type { PlannerTask } from "@/lib/schedule/types";
@@ -17,26 +19,41 @@ import {
   groupHolidaysByMonth,
   HOLIDAY_CATEGORY_LABELS,
   HOLIDAY_CATEGORY_COLORS,
-  type HolidayCategory,
   type HolidayItem,
 } from "@/lib/calendar/holiday-utils";
+import {
+  daysBetween,
+  findNextHoliday,
+  getHolidayDataset,
+  holidayNamesMatch,
+  holidayEntryToTask,
+  listSupportedCountries,
+  LOCAL_HOLIDAYS_COLOR,
+} from "@/lib/holidays/service";
+import type { LocalHolidayPreferences } from "@/lib/holidays/types";
 import { CalendarWorkspaceHeader } from "./calendar-workspace-header";
 
 export interface HolidaysViewProps {
   today: Date;
+  /** Today's calendar day in the planner time zone (Asia/Manila by default). */
   todayKey: string;
+  /** Built-in Local Holidays settings (independent of Google Calendar). */
+  localHolidayPrefs: LocalHolidayPreferences;
+  onChangeLocalHolidayPrefs: (patch: Partial<LocalHolidayPreferences>) => void;
+  onRefreshLocalHolidays: () => void;
+  /** Tasks/events from the calendars the user has enabled (holidays synced from Google are picked up from here). */
   tasks: PlannerTask[];
   allCalendarConfigs: Record<string, GoogleCalendarConfig>;
   resolvedTheme: ResolvedCalendarTheme;
 }
 
-const ALL_CATEGORIES: HolidayCategory[] = [
-  "regular",
-  "special_non_working",
-  "special_working",
-  "religious",
-  "international",
-  "other",
+type HolidayFilter = "all" | "regular" | "special_non_working" | "special_working";
+
+const HOLIDAY_FILTERS: Array<{ id: HolidayFilter; label: string }> = [
+  { id: "all", label: "All Holidays" },
+  { id: "regular", label: "Regular Holidays" },
+  { id: "special_non_working", label: "Special Non-Working" },
+  { id: "special_working", label: "Special Working" },
 ];
 
 const WEEKDAY_LABELS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
@@ -92,26 +109,57 @@ function MiniMonthCalendar({
 export function HolidaysView({
   today,
   todayKey,
+  localHolidayPrefs,
+  onChangeLocalHolidayPrefs,
+  onRefreshLocalHolidays,
   tasks,
   allCalendarConfigs,
   resolvedTheme,
 }: HolidaysViewProps) {
-  const currentYear = today.getFullYear();
+  const currentYear = Number(todayKey.slice(0, 4)) || today.getFullYear();
   const [year, setYear] = useState(currentYear);
   const [search, setSearch] = useState("");
-  const [activeCategories, setActiveCategories] = useState<Set<HolidayCategory>>(new Set());
+  const [filter, setFilter] = useState<HolidayFilter>("all");
   const [selectedHoliday, setSelectedHoliday] = useState<HolidayItem | null>(null);
 
-  const allHolidays = useMemo(() => extractHolidays(tasks), [tasks]);
+  // The Local Holidays dataset is read directly (not through Google sync), so this page is
+  // populated for every user, whether or not Google Calendar is connected.
+  const dataset = useMemo(
+    () => getHolidayDataset(localHolidayPrefs.countryCode, year, localHolidayPrefs.regionCode),
+    // lastRefreshedAt changes when the user refreshes the holiday data.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [localHolidayPrefs.countryCode, localHolidayPrefs.regionCode, localHolidayPrefs.lastRefreshedAt, year]
+  );
+
+  const localItems = useMemo<HolidayItem[]>(
+    () => dataset.holidays.map((entry) => ({ ...holidayEntryToTask(dataset, entry), category: entry.classification })),
+    [dataset]
+  );
+
+  // Holidays that came from a synced Google holiday calendar and are not already covered by the local list.
+  const googleExtras = useMemo<HolidayItem[]>(
+    () =>
+      extractHolidays(tasks).filter(
+        (h) =>
+          h.holidaySource !== "local" &&
+          h.dueDate?.startsWith(`${year}-`) &&
+          !localItems.some((l) => l.dueDate === h.dueDate && holidayNamesMatch(h.title, l.title))
+      ),
+    [tasks, localItems, year]
+  );
+
   const yearHolidays = useMemo(
-    () => allHolidays.filter((h) => h.dueDate?.startsWith(`${year}-`)),
-    [allHolidays, year]
+    () =>
+      [...localItems, ...googleExtras].sort(
+        (a, b) => (a.dueDate ?? "").localeCompare(b.dueDate ?? "") || a.title.localeCompare(b.title)
+      ),
+    [localItems, googleExtras]
   );
 
   const filteredHolidays = useMemo(() => {
     let list = yearHolidays;
-    if (activeCategories.size > 0) {
-      list = list.filter((h) => activeCategories.has(h.category));
+    if (filter !== "all") {
+      list = list.filter((h) => h.category === filter);
     }
     if (search.trim()) {
       const q = search.toLowerCase().trim();
@@ -123,34 +171,27 @@ export function HolidaysView({
       );
     }
     return list;
-  }, [yearHolidays, activeCategories, search]);
+  }, [yearHolidays, filter, search]);
 
   const groups = useMemo(
     () => groupHolidaysByMonth(filteredHolidays as Parameters<typeof groupHolidaysByMonth>[0], year),
     [filteredHolidays, year]
   );
 
-  const holidayDateSet = useMemo(
-    () => new Set(filteredHolidays.map((h) => h.dueDate!)),
-    [filteredHolidays]
-  );
-
-  const categoryCounts = useMemo(() => {
-    const counts: Partial<Record<HolidayCategory, number>> = {};
+  const filterCounts = useMemo(() => {
+    const counts: Record<HolidayFilter, number> = { all: yearHolidays.length, regular: 0, special_non_working: 0, special_working: 0 };
     for (const h of yearHolidays) {
-      counts[h.category] = (counts[h.category] ?? 0) + 1;
+      if (h.category === "regular" || h.category === "special_non_working" || h.category === "special_working") {
+        counts[h.category] += 1;
+      }
     }
     return counts;
   }, [yearHolidays]);
 
-  const toggleCategory = (cat: HolidayCategory) => {
-    setActiveCategories((prev) => {
-      const next = new Set(prev);
-      if (next.has(cat)) next.delete(cat);
-      else next.add(cat);
-      return next;
-    });
-  };
+  const nextHoliday = useMemo(
+    () => (year === currentYear ? findNextHoliday(yearHolidays, todayKey) : null),
+    [yearHolidays, todayKey, year, currentYear]
+  );
 
   const formatHolidayDate = (dateKey: string): string => {
     const [y, m, d] = dateKey.split("-").map(Number);
@@ -164,15 +205,20 @@ export function HolidaysView({
     return date.toLocaleDateString("en", { weekday: "short", month: "short", day: "numeric" });
   };
 
-  const usedCategories = useMemo(
-    () => ALL_CATEGORIES.filter((c) => (categoryCounts[c] ?? 0) > 0),
-    [categoryCounts]
-  );
+  const upcomingLabel = (dateKey: string): string | null => {
+    const diff = daysBetween(todayKey, dateKey);
+    if (diff === 0) return "Today";
+    if (diff === 1) return "Tomorrow";
+    if (diff > 1 && diff <= 30) return `In ${diff} days`;
+    return null;
+  };
 
   const sourceCalendars = useMemo(() => {
     const seen = new Set<string>();
-    const result: Array<{ id: string; name: string; color: string }> = [];
-    for (const h of yearHolidays) {
+    const result: Array<{ id: string; name: string; color: string }> = [
+      { id: "local-holidays", name: dataset.calendarName, color: LOCAL_HOLIDAYS_COLOR },
+    ];
+    for (const h of googleExtras) {
       const key = h.googleCalendarId ?? h.googleCalendarName ?? "";
       if (key && !seen.has(key)) {
         seen.add(key);
@@ -185,9 +231,15 @@ export function HolidaysView({
       }
     }
     return result;
-  }, [yearHolidays, allCalendarConfigs]);
+  }, [googleExtras, allCalendarConfigs, dataset.calendarName]);
 
-  const hasActiveFilters = activeCategories.size > 0 || search.trim() !== "";
+  const hasActiveFilters = filter !== "all" || search.trim() !== "";
+  const clearFilters = () => {
+    setFilter("all");
+    setSearch("");
+  };
+  const countries = listSupportedCountries();
+  const regionLabel = localHolidayPrefs.regionCode ? `${dataset.countryName} · ${localHolidayPrefs.regionCode}` : dataset.countryName;
 
   return (
     <section
@@ -213,8 +265,9 @@ export function HolidaysView({
         </button>
         <div className="hol-year-info">
           <span className="hol-year-label">{year}</span>
-          <span className="hol-year-count">
+          <span className="hol-year-count" data-testid="holiday-total">
             {yearHolidays.length} holiday{yearHolidays.length !== 1 ? "s" : ""}
+            {hasActiveFilters ? ` · ${filteredHolidays.length} shown` : ""}
           </span>
         </div>
         <button
@@ -226,6 +279,60 @@ export function HolidaysView({
           <CaretRight size={16} weight="bold" />
         </button>
       </div>
+
+      {/* Local Holidays calendar controls */}
+      <div className="hol-controls">
+        <label className="hol-control-toggle">
+          <input
+            type="checkbox"
+            checked={localHolidayPrefs.enabled}
+            onChange={() => onChangeLocalHolidayPrefs({ enabled: !localHolidayPrefs.enabled })}
+          />
+          <span>Show Holidays in calendar views</span>
+        </label>
+        {countries.length > 1 && (
+          <label className="hol-control-select">
+            <span>Country</span>
+            <select
+              value={localHolidayPrefs.countryCode}
+              onChange={(e) => onChangeLocalHolidayPrefs({ countryCode: e.target.value, regionCode: null })}
+            >
+              {countries.map((c) => (
+                <option key={c.code} value={c.code}>{c.name}</option>
+              ))}
+            </select>
+          </label>
+        )}
+        <span className="hol-control-region">{regionLabel} · {dataset.timeZone}</span>
+        <button type="button" className="hol-refresh-btn" onClick={onRefreshLocalHolidays}>
+          <ArrowsClockwise size={13} weight="bold" /> Refresh
+        </button>
+      </div>
+
+      {!localHolidayPrefs.enabled && (
+        <p className="hol-notice" role="status">
+          The Holidays calendar is hidden from the Dashboard, Day, Week, Month, Year and Agenda views. It is still listed here.
+        </p>
+      )}
+
+      {dataset.status === "statutory" && dataset.note && (
+        <p className="hol-notice" role="status">{dataset.note}</p>
+      )}
+      {dataset.status === "official" && dataset.note && (
+        <p className="hol-notice" role="status">{dataset.note}</p>
+      )}
+
+      {/* Next holiday indicator */}
+      {nextHoliday && nextHoliday.dueDate && (
+        <div className="hol-next" role="status">
+          <span className="hol-next-label">Next holiday</span>
+          <strong>{nextHoliday.title}</strong>
+          <span>
+            {formatShortDate(nextHoliday.dueDate)}
+            {upcomingLabel(nextHoliday.dueDate) ? ` · ${upcomingLabel(nextHoliday.dueDate)}` : ""}
+          </span>
+        </div>
+      )}
 
       {/* Source calendars */}
       {sourceCalendars.length > 0 && (
@@ -243,7 +350,7 @@ export function HolidaysView({
         </div>
       )}
 
-      {/* Search + category filters */}
+      {/* Search + classification filters */}
       <div className="hol-filter-bar">
         <div className="hol-search-box">
           <MagnifyingGlass size={13} weight="bold" className="hol-search-icon" />
@@ -267,32 +374,26 @@ export function HolidaysView({
           )}
         </div>
 
-        <div className="hol-category-filters" role="group" aria-label="Filter by category">
-          {usedCategories.map((cat) => {
-            const isActive = activeCategories.has(cat);
-            const color = HOLIDAY_CATEGORY_COLORS[cat];
+        <div className="hol-category-filters" role="group" aria-label="Filter by classification">
+          {HOLIDAY_FILTERS.map(({ id, label }) => {
+            const isActive = filter === id;
+            const color = id === "all" ? "#111111" : HOLIDAY_CATEGORY_COLORS[id];
             return (
               <button
-                key={cat}
+                key={id}
                 type="button"
                 className={`hol-cat-chip${isActive ? " is-active" : ""}`}
                 style={isActive ? { backgroundColor: color, borderColor: color, color: "#fff" } : { borderColor: color, color }}
-                onClick={() => toggleCategory(cat)}
+                onClick={() => setFilter(id)}
                 aria-pressed={isActive}
               >
-                {HOLIDAY_CATEGORY_LABELS[cat]}
-                {(categoryCounts[cat] ?? 0) > 0 && (
-                  <span className="hol-cat-count">{categoryCounts[cat]}</span>
-                )}
+                {label}
+                <span className="hol-cat-count">{filterCounts[id]}</span>
               </button>
             );
           })}
           {hasActiveFilters && (
-            <button
-              type="button"
-              className="hol-clear-filters-btn"
-              onClick={() => { setActiveCategories(new Set()); setSearch(""); }}
-            >
+            <button type="button" className="hol-clear-filters-btn" onClick={clearFilters}>
               Clear filters
             </button>
           )}
@@ -327,23 +428,27 @@ export function HolidaysView({
         {/* Chronological holiday list by month */}
         <div className="hol-list">
           {groups.length === 0 ? (
-            <div className="hol-empty-state">
-              <Sun size={36} weight="light" className="hol-empty-icon" />
-              {yearHolidays.length === 0 ? (
+            <div className="hol-empty-state" role={dataset.status === "unavailable" ? "alert" : undefined}>
+              {yearHolidays.length === 0 && dataset.status === "unavailable" ? (
                 <>
+                  <Warning size={36} weight="light" className="hol-empty-icon" />
+                  <p className="hol-empty-title">Holiday data is unavailable for {year}</p>
+                  <p className="hol-empty-sub">{dataset.note ?? "The holiday dataset could not be loaded."}</p>
+                  <button type="button" className="hol-clear-filters-btn" onClick={onRefreshLocalHolidays}>
+                    Try again
+                  </button>
+                </>
+              ) : yearHolidays.length === 0 ? (
+                <>
+                  <Sun size={36} weight="light" className="hol-empty-icon" />
                   <p className="hol-empty-title">No holidays found for {year}</p>
-                  <p className="hol-empty-sub">
-                    Connect a Google Calendar holiday calendar in the sidebar to import public holidays.
-                  </p>
+                  <p className="hol-empty-sub">There are no holidays on record for {regionLabel} in {year}.</p>
                 </>
               ) : (
                 <>
+                  <Sun size={36} weight="light" className="hol-empty-icon" />
                   <p className="hol-empty-title">No holidays match your filters</p>
-                  <button
-                    type="button"
-                    className="hol-clear-filters-btn"
-                    onClick={() => { setActiveCategories(new Set()); setSearch(""); }}
-                  >
+                  <button type="button" className="hol-clear-filters-btn" onClick={clearFilters}>
                     Clear filters
                   </button>
                 </>
@@ -360,14 +465,17 @@ export function HolidaysView({
                   {items.map((holiday) => {
                     const isSelected = selectedHoliday?.id === holiday.id;
                     const catColor = HOLIDAY_CATEGORY_COLORS[holiday.category];
+                    const isLocal = holiday.holidaySource === "local";
                     const calCfg = holiday.googleCalendarId
                       ? allCalendarConfigs[holiday.googleCalendarId]
                       : undefined;
-                    const calName = calCfg?.name ?? holiday.googleCalendarName;
+                    const calName = isLocal ? dataset.calendarName : calCfg?.name ?? holiday.googleCalendarName;
+                    const isNext = nextHoliday?.id === holiday.id;
+                    const soon = holiday.dueDate && holiday.dueDate >= todayKey ? upcomingLabel(holiday.dueDate) : null;
                     return (
                       <div
                         key={holiday.id}
-                        className={`hol-item${isSelected ? " is-selected" : ""}`}
+                        className={`hol-item${isSelected ? " is-selected" : ""}${isNext ? " is-next" : ""}`}
                         onClick={() => setSelectedHoliday(isSelected ? null : holiday)}
                         role="button"
                         tabIndex={0}
@@ -392,7 +500,14 @@ export function HolidaysView({
                             style={{ color: catColor, borderColor: `${catColor}44`, backgroundColor: `${catColor}12` }}
                           >
                             {HOLIDAY_CATEGORY_LABELS[holiday.category]}
+                            {holiday.holidayAdditional ? " · Additional" : ""}
                           </span>
+                          <span className="hol-item-region">{isLocal ? regionLabel : calName ?? "Holiday"}</span>
+                          {isNext ? (
+                            <span className="hol-item-upcoming is-next">Next{soon ? ` · ${soon}` : ""}</span>
+                          ) : soon ? (
+                            <span className="hol-item-upcoming">{soon}</span>
+                          ) : null}
                         </div>
 
                         {/* Expanded detail panel */}
@@ -404,10 +519,25 @@ export function HolidaysView({
                                 <dd>{formatHolidayDate(holiday.dueDate!)}</dd>
                               </div>
                               <div>
-                                <dt>Category</dt>
-                                <dd style={{ color: catColor }}>{HOLIDAY_CATEGORY_LABELS[holiday.category]}</dd>
+                                <dt>Classification</dt>
+                                <dd style={{ color: catColor }}>
+                                  {HOLIDAY_CATEGORY_LABELS[holiday.category]}
+                                  {holiday.holidayAdditional ? " (additional, by proclamation)" : ""}
+                                </dd>
                               </div>
-                              {holiday.notes && (
+                              {isLocal && (
+                                <div>
+                                  <dt>Country / region</dt>
+                                  <dd>{regionLabel}</dd>
+                                </div>
+                              )}
+                              {isLocal && (
+                                <div>
+                                  <dt>Source</dt>
+                                  <dd>{dataset.sourceLabel}</dd>
+                                </div>
+                              )}
+                              {!isLocal && holiday.notes && (
                                 <div>
                                   <dt>Description</dt>
                                   <dd>{holiday.notes}</dd>
@@ -415,13 +545,13 @@ export function HolidaysView({
                               )}
                               {calName && (
                                 <div>
-                                  <dt>Source calendar</dt>
+                                  <dt>Calendar</dt>
                                   <dd>
                                     <span className="hol-detail-cal">
                                       <CalendarBlank
                                         size={12}
                                         weight="bold"
-                                        color={calCfg?.color ?? holiday.googleCalendarColor ?? catColor}
+                                        color={isLocal ? LOCAL_HOLIDAYS_COLOR : calCfg?.color ?? holiday.googleCalendarColor ?? catColor}
                                       />
                                       {calName}
                                     </span>
@@ -443,10 +573,10 @@ export function HolidaysView({
 
       <div className="calendar-footer hol-footer">
         <span className="legend">
-          <i className="day-dot pink" /> Public &amp; special holidays
+          <i className="day-dot pink" /> {dataset.calendarName}
         </span>
         <span className="footer-hint">
-          Holiday data is imported from connected Google Calendar holiday calendars · Read-only
+          {dataset.sourceLabel} · Read-only · Independent of Google Calendar
         </span>
       </div>
     </section>

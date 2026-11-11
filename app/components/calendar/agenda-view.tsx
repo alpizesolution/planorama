@@ -64,9 +64,14 @@ export function AgendaView({
   const [groupBy, setGroupBy] = useState<"date" | "project" | "priority">("date");
 
   // Filter by selected date, type filter, and search query
-  // Holidays are excluded from the Agenda — they appear in the dedicated Holidays page
+  // Holidays (Local Holidays calendar + any synced holiday calendar) are listed alongside events
   const filteredTasks = useMemo(() => {
-    let list = tasks.filter((t) => t.dueDate && !isHolidayItem(t));
+    let list = tasks.filter((t) => t.dueDate);
+    // Past holidays are not agenda items (the built-in calendar spans several years); they stay
+    // reachable by picking that date or searching.
+    if (!selectedDate && !searchQuery.trim()) {
+      list = list.filter((t) => !(isHolidayItem(t) && (t.dueDate as string) < todayKey));
+    }
     if (selectedDate) {
       list = list.filter((t) => t.dueDate === selectedDate);
     }
@@ -104,7 +109,7 @@ export function AgendaView({
       const bTime = b.dueTime ?? "00:00-allday";
       return aTime.localeCompare(bTime);
     });
-  }, [tasks, selectedDate, typeFilter, searchQuery]);
+  }, [tasks, selectedDate, typeFilter, searchQuery, todayKey]);
 
   // Group filtered tasks — by date (default), project, or priority
   const groupedByDate = useMemo(() => {
@@ -503,22 +508,18 @@ export function AgendaView({
                   </button>
                 </div>
               </>
-            ) : tasks.filter((t) => !isHolidayItem(t)).length === 0 && allTasksCount > 0 ? (
+            ) : tasks.length === 0 && allTasksCount > 0 ? (
               <>
                 <p className="empty-tasks">
                   No events or tasks match the currently enabled calendars.
                 </p>
                 <p className="agenda-empty-subtext">
                   Check calendar visibility checkboxes in the sidebar to display items.
-                  Public holidays are shown in the Holidays page.
                 </p>
               </>
             ) : (
               <>
                 <p className="empty-tasks">No upcoming tasks or events scheduled.</p>
-                <p className="agenda-empty-subtext">
-                  Public holidays are shown in the Holidays page.
-                </p>
                 <button
                   type="button"
                   className="agenda-add-task-header-btn"
