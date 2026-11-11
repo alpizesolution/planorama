@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { normalizeBaseUrl } from "./app-url";
 
 /**
  * Server-side cryptographic helper for Planorama.
@@ -220,7 +221,8 @@ export function validateRedirectUrl(url: string | null | undefined, allowedBaseU
   // Absolute URLs: only allowed if matching the app's own origin
   try {
     const parsed = new URL(trimmed);
-    const appBase = allowedBaseUrl || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    const appBase =
+      allowedBaseUrl || normalizeBaseUrl(process.env.NEXT_PUBLIC_APP_URL) || "http://localhost:3000";
     const allowedOrigin = new URL(appBase).origin.toLowerCase();
 
     if (parsed.origin.toLowerCase() === allowedOrigin) {

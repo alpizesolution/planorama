@@ -3,6 +3,7 @@ import { getVerifiedSession, encodeSignedSession, SIGNED_SESSION_COOKIE_NAME } f
 import { verifySignedOAuthState } from "@/lib/server/crypto";
 import { exchangeOAuthCode } from "@/lib/server/google-calendar";
 import { saveEncryptedCredentials } from "@/lib/server/google-token-store";
+import { resolveAppBaseUrl } from "@/lib/server/app-url";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,8 @@ export async function GET(request: Request) {
   const state = url.searchParams.get("state");
   const error = url.searchParams.get("error");
 
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || `${url.protocol}//${url.host}`;
+  // Never throws: a malformed NEXT_PUBLIC_APP_URL falls back to the request origin.
+  const baseUrl = resolveAppBaseUrl(url);
 
   // 1. Handle user decline or Google error
   if (error) {
@@ -45,8 +47,7 @@ export async function GET(request: Request) {
     const stateVerification = verifySignedOAuthState(state, session.sessionId, undefined, session.userId);
     if (!stateVerification.valid) {
       console.error("[Auth/GoogleCallback] State verification failed:", stateVerification.error);
-      const destination = stateVerification.returnUrl || "/";
-      const redirectUrl = new URL(destination, baseUrl);
+      const redirectUrl = buildRedirectUrl(stateVerification.returnUrl, baseUrl);
       redirectUrl.searchParams.set("gcal_error", stateVerification.error || "invalid_state");
       return NextResponse.redirect(redirectUrl.toString());
     }
@@ -76,8 +77,7 @@ export async function GET(request: Request) {
       accountId
     );
 
-    const destination = stateVerification.returnUrl || "/";
-    const redirectUrl = new URL(destination, baseUrl);
+    const redirectUrl = buildRedirectUrl(stateVerification.returnUrl, baseUrl);
     redirectUrl.searchParams.set("gcal_status", "connected");
     if (tokenResult.userEmail) {
       redirectUrl.searchParams.set("gcal_account", tokenResult.userEmail);
@@ -94,9 +94,22 @@ export async function GET(request: Request) {
     return response;
   } catch (err) {
     const message = err instanceof Error ? err.message : "Token exchange failed.";
-    console.error("[Auth/GoogleCallback] Exchange failed:", message);
+    console.error("[Auth/GoogleCallback] Exchange failed:", message, err);
     const redirectUrl = new URL("/", baseUrl);
     redirectUrl.searchParams.set("gcal_error", "token_exchange_failed");
     return NextResponse.redirect(redirectUrl.toString());
+  }
+}
+
+/**
+ * Builds the post-OAuth redirect target. returnUrl comes from the verified,
+ * signed state and is already restricted to same-origin relative paths; if it
+ * still cannot be parsed, fall back to the app root instead of throwing.
+ */
+function buildRedirectUrl(returnUrl: string | undefined, baseUrl: string): URL {
+  try {
+    return new URL(returnUrl || "/", baseUrl);
+  } catch {
+    return new URL("/", baseUrl);
   }
 }
