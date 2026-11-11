@@ -46,6 +46,8 @@ export interface LocalHolidayPreferences {
   enabled: boolean;
   countryCode: string;
   regionCode: string | null;
+  /** Custom colour (`#rrggbb`) for holiday tiles; the default red is used when unset. */
+  color?: string;
   /** ISO timestamp of the last manual refresh (informational). */
   lastRefreshedAt?: string;
 }

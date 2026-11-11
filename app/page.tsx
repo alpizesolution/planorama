@@ -55,6 +55,7 @@ import {
   isLocalHolidayTask,
   mergeLocalHolidays,
   refreshHolidayCache,
+  resolveHolidayColor,
   resolveLocalHolidayPreferences,
 } from "@/lib/holidays/service";
 import type { LocalHolidayPreferences } from "@/lib/holidays/types";
@@ -1821,14 +1822,14 @@ export default function HomePage() {
   // Memoized tasks by due date for O(1) annual grid lookups
   const tasksByDueDate = useMemo(() => {
     const map: Record<string, PlannerTask[]> = {};
-    for (const t of displayedTasks) {
+    for (const t of calendarItems) {
       if (t.dueDate) {
         if (!map[t.dueDate]) map[t.dueDate] = [];
         map[t.dueDate].push(t);
       }
     }
     return map;
-  }, [displayedTasks]);
+  }, [calendarItems]);
 
   const renderYearlineView = () => {
     const yearTasksCount = displayedTasks.filter((t) => t.dueDate?.startsWith(`${shownYear}-`)).length;
@@ -2021,7 +2022,10 @@ export default function HomePage() {
                         const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
                         const isToday = dateKey === todayKey;
                         const isSelected = dateKey === selectedDate;
-                        const dueTasks = tasksByDueDate[dateKey] || [];
+                        const allDueItems = tasksByDueDate[dateKey] || [];
+                        const holidaysOnDay = allDueItems.filter((t) => t.isHoliday);
+                        const dueTasks = allDueItems.filter((t) => !t.isHoliday);
+                        const holidayColor = holidaysOnDay[0]?.color;
                         const taskCount = dueTasks.length;
                         const hasTasks = taskCount > 0;
                         const hasMultipleTasks = taskCount > 1;
@@ -2036,16 +2040,25 @@ export default function HomePage() {
                               ...(isToday ? { backgroundColor: resolvedTheme.todayBg } : {}),
                               ...(isSelected && !isToday ? { backgroundColor: resolvedTheme.selectedBg } : {}),
                               ...(isWeekend && !isToday && !isSelected ? { backgroundColor: resolvedTheme.weekendBg } : {}),
+                              ...(holidayColor && !isToday && !isSelected
+                                ? { backgroundColor: `${holidayColor}38`, borderColor: holidayColor, fontWeight: 800 }
+                                : {}),
+                              ...(holidayColor && (isToday || isSelected) ? { borderColor: holidayColor } : {}),
                             }}
                             onClick={() => {
                               if (hasDraggedRef.current) return;
                               handleSelectYearlineDate(dateKey);
                             }}
-                            title={`${MONTH_NAMES[mIdx]} ${dayNum}, ${shownYear}${isWeekend ? " (Weekend)" : ""}${hasTasks ? ` · ${taskCount} task(s)` : ""}`}
+                            title={`${MONTH_NAMES[mIdx]} ${dayNum}, ${shownYear}${isWeekend ? " (Weekend)" : ""}${holidaysOnDay.length ? ` · ${holidaysOnDay.map((h) => h.title).join(", ")}` : ""}${hasTasks ? ` · ${taskCount} task(s)` : ""}`}
                             aria-label={`${MONTH_NAMES[mIdx]} ${dayNum}, ${shownYear}${isWeekend ? " (Weekend)" : ""}${hasTasks ? ` (${taskCount} tasks)` : ""}`}
                             aria-pressed={isSelected}
                           >
                             <span className="yearline-mini-day-num">{dayNum}</span>
+                            {holidayColor && !hasTasks && (
+                              <span className="yearline-mini-dot-wrapper">
+                                <span className="yearline-mini-dot" style={{ backgroundColor: holidayColor, width: 5, height: 5 }} />
+                              </span>
+                            )}
                             {hasTasks && (
                               <span className="yearline-mini-dot-wrapper">
                                 {taskCount === 1 ? (
@@ -2073,7 +2086,10 @@ export default function HomePage() {
                       const isWeekend = dayDate.getDay() === 0 || dayDate.getDay() === 6;
                       const isToday = dateKey === todayKey;
                       const isSelected = dateKey === selectedDate;
-                      const dayTasks = tasksByDueDate[dateKey] || [];
+                      const dayItems = tasksByDueDate[dateKey] || [];
+                      const dayHolidays = dayItems.filter((t) => t.isHoliday);
+                      const dayTasks = dayItems.filter((t) => !t.isHoliday);
+                      const dayHolidayColor = dayHolidays[0]?.color;
                       const taskCount = dayTasks.length;
                       const hasTasks = taskCount > 0;
                       const hasMultipleTasks = taskCount > 1;
@@ -2088,6 +2104,8 @@ export default function HomePage() {
                             ...(isToday ? { backgroundColor: resolvedTheme.todayBg } : {}),
                             ...(isSelected && !isToday ? { backgroundColor: resolvedTheme.selectedBg } : {}),
                             ...(isWeekend && !isToday && !isSelected ? { backgroundColor: resolvedTheme.weekendBg } : {}),
+                            ...(dayHolidayColor && !isToday && !isSelected ? { backgroundColor: `${dayHolidayColor}22` } : {}),
+                            ...(dayHolidayColor ? { boxShadow: `inset 4px 0 0 ${dayHolidayColor}` } : {}),
                           }}
                           onClick={() => {
                             if (hasDraggedRef.current) return;
@@ -2136,6 +2154,27 @@ export default function HomePage() {
                               </button>
                             </div>
                           </div>
+
+                          {/* Holidays on this date (read-only tiles in the holiday colour) */}
+                          {dayHolidays.length > 0 && (
+                            <div className="yearline-task-list yearline-holiday-list">
+                              {dayHolidays.map((h) => {
+                                const tileStyle = getItemTileStyle(h, preferences.itemStyles, activeCalendarConfigs);
+                                return (
+                                  <div
+                                    key={h.id}
+                                    className={`yearline-task-item yearline-holiday-item ${tileStyle.className}`}
+                                    style={tileStyle.style}
+                                    title={`Holiday: ${h.title}`}
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <span className="yearline-task-badge-icon" aria-hidden="true">🎉</span>
+                                    <span className="yearline-task-title-btn">{h.title}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
 
                           {/* Tasks inside this date row */}
                           {dayTasks.length > 0 && (
@@ -2598,6 +2637,7 @@ export default function HomePage() {
               localCalendarEnabled,
               onToggleLocalCalendar: () => setLocalCalendarEnabled((prev) => !prev),
               localHolidaysEnabled: localHolidayPrefs.enabled,
+              localHolidaysColor: resolveHolidayColor(localHolidayPrefs.color),
               onToggleLocalHolidays: () => updateLocalHolidayPrefs({ enabled: !localHolidayPrefs.enabled }),
               googleStatus,
               calendarConfigs: activeCalendarConfigs,

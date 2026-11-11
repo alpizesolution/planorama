@@ -77,6 +77,8 @@ export function YearView({
   };
 
   const isTileMode = resolvedTheme.mode === "tiles";
+  // Colour of the Holidays calendar (customisable); undefined when holidays are hidden
+  const legendHolidayColor = useMemo(() => tasks.find((t) => t.holidaySource === "local")?.color, [tasks]);
 
   return (
     <section
@@ -169,7 +171,10 @@ export function YearView({
                   const isWeekend = dayDate.getDay() === 0 || dayDate.getDay() === 6;
                   const isToday = dateKey === todayKey;
                   const isSelected = dateKey === selectedDate;
-                  const dueTasks = tasksByDate.get(dateKey) || [];
+                  const dayItems = tasksByDate.get(dateKey) || [];
+                  const dayHolidays = dayItems.filter((t) => t.isHoliday);
+                  const dueTasks = dayItems.filter((t) => !t.isHoliday);
+                  const holidayColor = dayHolidays[0]?.color;
                   const hasTasks = dueTasks.length > 0;
                   const openCount = dueTasks.filter((t) => t.status !== "completed").length;
 
@@ -182,22 +187,37 @@ export function YearView({
                     cellStyle.backgroundColor = resolvedTheme.todayBg;
                   } else if (isSelected) {
                     cellStyle.backgroundColor = resolvedTheme.selectedBg;
+                  } else if (holidayColor) {
+                    cellStyle.backgroundColor = `${holidayColor}38`;
                   } else if (isWeekend) {
                     cellStyle.backgroundColor = resolvedTheme.weekendBg;
                   }
+                  if (holidayColor) {
+                    // Holidays get a ring in the holiday colour (kept visible on today/selected too)
+                    cellStyle.boxShadow = `${cellStyle.boxShadow ? `${cellStyle.boxShadow}, ` : ""}inset 0 0 0 1.5px ${holidayColor}`;
+                  }
+                  const holidayTitle = dayHolidays.length ? ` · ${dayHolidays.map((h) => h.title).join(", ")}` : "";
 
                   return (
                     <button
                       type="button"
                       key={dateKey}
-                      className={`year-mini-day ${isToday ? "today" : ""} ${isSelected ? "selected" : ""} ${isWeekend ? "is-weekend" : ""} ${hasTasks ? "has-tasks" : ""}`}
+                      className={`year-mini-day ${isToday ? "today" : ""} ${isSelected ? "selected" : ""} ${isWeekend ? "is-weekend" : ""} ${hasTasks ? "has-tasks" : ""} ${holidayColor ? "has-holiday" : ""}`}
                       style={cellStyle}
                       onClick={() => onSelectDate(dateKey)}
-                      title={`${monthTitle} ${dayNum}, ${shownYear}${isWeekend ? " (Weekend)" : ""}${hasTasks ? ` · ${dueTasks.length} item(s) (${openCount} open)` : ""}`}
-                      aria-label={`${monthTitle} ${dayNum}, ${shownYear}${isWeekend ? " (Weekend)" : ""}${hasTasks ? ` (${dueTasks.length} items)` : ""}`}
+                      title={`${monthTitle} ${dayNum}, ${shownYear}${isWeekend ? " (Weekend)" : ""}${holidayTitle}${hasTasks ? ` · ${dueTasks.length} item(s) (${openCount} open)` : ""}`}
+                      aria-label={`${monthTitle} ${dayNum}, ${shownYear}${isWeekend ? " (Weekend)" : ""}${holidayTitle}${hasTasks ? ` (${dueTasks.length} items)` : ""}`}
                       aria-pressed={isSelected}
                     >
-                      <span className="year-mini-day-num">{dayNum}</span>
+                      <span className="year-mini-day-num" style={holidayColor && !isSelected ? { fontWeight: 800 } : undefined}>{dayNum}</span>
+                      {holidayColor && !hasTasks && (
+                        <span className="year-mini-dot-wrapper">
+                          <span
+                            className="year-mini-dot"
+                            style={{ backgroundColor: holidayColor, borderColor: holidayColor, width: 5, height: 5 }}
+                          />
+                        </span>
+                      )}
                       {hasTasks && (
                         <span className="year-mini-dot-wrapper">
                           {dueTasks.length === 1 ? (
@@ -267,6 +287,11 @@ export function YearView({
           />{" "}
           Has Tasks/Events
         </span>
+        {legendHolidayColor && (
+          <span className="year-legend-item">
+            <span className="year-legend-swatch tasks" style={{ backgroundColor: legendHolidayColor }} /> Holiday
+          </span>
+        )}
         <button
           type="button"
           className="clear-date-button"
