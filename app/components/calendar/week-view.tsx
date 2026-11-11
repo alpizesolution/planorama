@@ -35,6 +35,8 @@ import {
   parseMinutesFromTime,
   type PositionedDayEvent,
 } from "@/lib/calendar/day-layout";
+import { daysBetween } from "@/lib/holidays/service";
+import { HolidayBanner } from "./holiday-banner";
 import { toDateKey, formatWeekRange } from "@/lib/calendar/date-utils";
 import { isTaskItem } from "@/lib/calendar/item-classifier";
 

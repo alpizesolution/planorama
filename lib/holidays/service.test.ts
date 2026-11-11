@@ -9,6 +9,7 @@ import { phStatutoryHolidays, PH_OFFICIAL_YEARS } from "./ph-data";
 import {
   buildLocalHolidayTasks,
   daysBetween,
+  findHolidayNotices,
   findNextHoliday,
   getHolidayDataset,
   getTodayKey,
@@ -412,5 +413,22 @@ describe("Year and Yearline views", () => {
     expect(page).toMatch(/for \(const t of calendarItems\)/);
     expect(page).toMatch(/yearline-holiday-item/);
     expect(page).toMatch(/const dayTasks = dayItems\.filter\(\(t\) => !t\.isHoliday\)/);
+  });
+});
+
+describe("findHolidayNotices", () => {
+  const hs = [
+    { title: "Bonifacio Day", dueDate: "2026-11-30" },
+    { title: "bonifacio day", dueDate: "2026-11-30" },
+    { title: "All Souls' Day", dueDate: "2026-11-02" },
+  ];
+  it("finds today's holiday and dedupes", () => {
+    const n = findHolidayNotices(hs, "2026-11-30");
+    expect(n).toHaveLength(1);
+    expect(n[0].daysAway).toBe(0);
+  });
+  it("looks ahead and ignores past days", () => {
+    expect(findHolidayNotices(hs, "2026-11-29", 1)[0].daysAway).toBe(1);
+    expect(findHolidayNotices(hs, "2026-11-03", 0)).toHaveLength(0);
   });
 });
