@@ -49,6 +49,15 @@ import { WeekView } from "@/app/components/calendar/week-view";
 import { YearView } from "@/app/components/calendar/year-view";
 import { AgendaView } from "@/app/components/calendar/agenda-view";
 import { HolidaysView } from "@/app/components/calendar/holidays-view";
+import {
+  getTodayKey,
+  holidayYearsAround,
+  isLocalHolidayTask,
+  mergeLocalHolidays,
+  refreshHolidayCache,
+  resolveLocalHolidayPreferences,
+} from "@/lib/holidays/service";
+import type { LocalHolidayPreferences } from "@/lib/holidays/types";
 import { UserProfileButton } from "@/app/components/auth/user-profile-button";
 import {
   executeTwoWaySync,
@@ -597,9 +606,10 @@ export default function HomePage() {
 
   const activeCalendarCount = useMemo(() => {
     let count = localCalendarEnabled ? 1 : 0;
+    if (resolveLocalHolidayPreferences(preferences.localHolidays).enabled) count += 1;
     count += Object.values(activeCalendarConfigs).filter((cal) => cal.enabled).length;
     return count;
-  }, [localCalendarEnabled, activeCalendarConfigs]);
+  }, [localCalendarEnabled, activeCalendarConfigs, preferences.localHolidays]);
 
   // Filter tasks based on disabled calendars and user's calendar/client selection
   const displayedTasks = useMemo(() => {
@@ -622,6 +632,25 @@ export default function HomePage() {
       return true;
     });
   }, [tasks, activeCalendarConfigs, calendarFilter, localCalendarEnabled]);
+
+  // Local Holidays: a built-in calendar that is independent of Google Calendar. The
+  // holidays are derived (never stored), so Google sync can never duplicate them.
+  const localHolidayPrefs = useMemo(
+    () => resolveLocalHolidayPreferences(preferences.localHolidays),
+    [preferences.localHolidays]
+  );
+  const holidayTimeZone = preferences.timeZone || "Asia/Manila";
+  const holidayTodayKey = useMemo(() => getTodayKey(holidayTimeZone), [holidayTimeZone]);
+  const calendarItems = useMemo(
+    () =>
+      mergeLocalHolidays(
+        displayedTasks,
+        // A specific-calendar filter (Personal Planner or one Google calendar) hides the Holidays calendar.
+        { ...localHolidayPrefs, enabled: localHolidayPrefs.enabled && !calendarFilter },
+        holidayYearsAround(holidayTodayKey)
+      ),
+    [displayedTasks, localHolidayPrefs, calendarFilter, holidayTodayKey]
+  );
 
   const completed = displayedTasks.filter((task) => task.status === "completed").length;
   const visibleTasks = displayedTasks.filter((task) => {
@@ -691,6 +720,7 @@ export default function HomePage() {
           googleCalendarSync: parsed.googleCalendarSync && typeof parsed.googleCalendarSync === "object"
             ? (parsed.googleCalendarSync as GoogleCalendarSyncSettings)
             : DEFAULT_PREFERENCES.googleCalendarSync,
+          localHolidays: resolveLocalHolidayPreferences(parsed.localHolidays),
           sidebarCollapsed: typeof parsed.sidebarCollapsed === "boolean" ? parsed.sidebarCollapsed : DEFAULT_PREFERENCES.sidebarCollapsed,
           itemColors: resolveItemColorPreferences(parsed.itemColors),
           itemStyles: resolveItemStylesPreferences(parsed.itemStyles, parsed.itemColors),
@@ -737,6 +767,16 @@ export default function HomePage() {
     } catch {
       setSaveError("Could not save your planner preferences on this device.");
     }
+  }
+
+  function updateLocalHolidayPrefs(patch: Partial<LocalHolidayPreferences>) {
+    savePreferences({ ...preferences, localHolidays: { ...localHolidayPrefs, ...patch } });
+  }
+
+  function refreshLocalHolidays() {
+    const refreshedAt = refreshHolidayCache();
+    updateLocalHolidayPrefs({ lastRefreshedAt: refreshedAt });
+    showToast("Holiday data refreshed");
   }
 
   const [isSyncingGoogle, setIsSyncingGoogle] = useState(false);
@@ -1629,6 +1669,7 @@ export default function HomePage() {
   }
 
   async function saveEdit(task: PlannerTask) {
+    if (isLocalHolidayTask(task)) return; // generated, read-only
     const title = editTitle.trim();
     if (!title) {
       setSaveError("A task title is required.");
@@ -1677,6 +1718,7 @@ export default function HomePage() {
   }
 
   async function toggleTask(task: PlannerTask) {
+    if (isLocalHolidayTask(task)) return; // generated, read-only
     const updated = { ...task, status: task.status === "completed" ? "open" as const : "completed" as const };
     setTasks((current) => current.map((item) => item.id === task.id ? updated : item));
     try {
@@ -1723,6 +1765,7 @@ export default function HomePage() {
   }
 
   async function deleteTask(task: PlannerTask) {
+    if (isLocalHolidayTask(task)) return; // generated, read-only
     if (task.isReadOnlyCalendar) {
       if (!window.confirm(`"${task.title}" is from a read-only client calendar. Deleting it will remove it from your Planorama view, but will not delete it from Google Calendar. Proceed?`)) {
         return;
@@ -2326,7 +2369,7 @@ export default function HomePage() {
       onResetToToday={todayWeek}
       weekStartsOn={preferences.weekStartsOn}
       resolvedTheme={resolvedTheme}
-      tasks={displayedTasks}
+      tasks={calendarItems}
       allCalendarConfigs={activeCalendarConfigs}
       onAddTask={(options) =>
         openAddTask({
@@ -2538,7 +2581,7 @@ export default function HomePage() {
               },
               onNavigateMonth: (offset) => setMonthOffset((curr) => curr + offset),
               weekStartsOn: preferences.weekStartsOn,
-              tasks,
+              tasks: calendarItems,
               onAddEvent: (dateKey) =>
                 openAddEvent({
                   date: dateKey || selectedDate || (view === "week" || view === "workWeek" ? toDateKey(weeklyAnchorDate) : todayKey),
@@ -2554,6 +2597,8 @@ export default function HomePage() {
                 }),
               localCalendarEnabled,
               onToggleLocalCalendar: () => setLocalCalendarEnabled((prev) => !prev),
+              localHolidaysEnabled: localHolidayPrefs.enabled,
+              onToggleLocalHolidays: () => updateLocalHolidayPrefs({ enabled: !localHolidayPrefs.enabled }),
               googleStatus,
               calendarConfigs: activeCalendarConfigs,
               onToggleCalendar: handleToggleCalendar,
@@ -2573,7 +2618,7 @@ export default function HomePage() {
             {/* ===== DASHBOARD VIEW (Personal Planning Command Center) ===== */}
             {view === "dashboard" && (
               <DashboardView
-                tasks={displayedTasks}
+                tasks={calendarItems}
                 habits={habits}
                 checkIns={checkIns}
                 todayKey={todayKey}
@@ -2644,7 +2689,7 @@ export default function HomePage() {
                 onYearChange={handleYearChange}
                 weekStartsOn={preferences.weekStartsOn}
                 resolvedTheme={resolvedTheme}
-                tasks={displayedTasks}
+                tasks={calendarItems}
                 allCalendarConfigs={activeCalendarConfigs}
                 activeCalendarCount={activeCalendarCount}
                 itemColors={preferences.itemColors ?? DEFAULT_ITEM_COLORS}
@@ -2684,7 +2729,7 @@ export default function HomePage() {
                 setWeeklyAnchorDate(new Date(y, m - 1, d));
               }}
               resolvedTheme={resolvedTheme}
-              tasks={displayedTasks}
+              tasks={calendarItems}
               allCalendarConfigs={activeCalendarConfigs}
               onAddTask={(options) =>
                 openAddTask({
@@ -2754,7 +2799,7 @@ export default function HomePage() {
               }}
               weekStartsOn={preferences.weekStartsOn}
               resolvedTheme={resolvedTheme}
-              tasks={displayedTasks}
+              tasks={calendarItems}
               allCalendarConfigs={activeCalendarConfigs}
               onAddTask={(options) => openAddTask({ date: options?.date || selectedDate || todayKey, time: options?.time, status: options?.status || "open" })}
               onOpenTaskDetail={openTaskDetail}
@@ -2779,7 +2824,7 @@ export default function HomePage() {
                   setMonthOffset(0);
                 }
               }}
-              tasks={displayedTasks}
+              tasks={calendarItems}
               allTasksCount={tasks.length}
               allCalendarConfigs={activeCalendarConfigs}
               labels={labels}
@@ -2804,7 +2849,10 @@ export default function HomePage() {
           {view === "holidays" && (
             <HolidaysView
               today={today}
-              todayKey={todayKey}
+              todayKey={holidayTodayKey}
+              localHolidayPrefs={localHolidayPrefs}
+              onChangeLocalHolidayPrefs={updateLocalHolidayPrefs}
+              onRefreshLocalHolidays={refreshLocalHolidays}
               tasks={displayedTasks}
               allCalendarConfigs={activeCalendarConfigs}
               resolvedTheme={resolvedTheme}

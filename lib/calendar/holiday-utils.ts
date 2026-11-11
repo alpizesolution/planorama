@@ -48,6 +48,8 @@ const INTERNATIONAL_KEYWORDS = [
 ];
 
 export function inferHolidayCategory(item: PlannerTask): HolidayCategory {
+  // Built-in Local Holidays carry their official classification; no guessing needed.
+  if (item.holidayCategory) return item.holidayCategory;
   const text = `${item.title} ${item.notes || ""}`.toLowerCase();
 
   for (const kw of SPECIAL_NON_WORKING_KEYWORDS) {

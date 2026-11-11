@@ -23,6 +23,7 @@ import type {
   GoogleIntegrationStatus,
   ConnectedGoogleAccount,
 } from "@/lib/google-calendar/types";
+import { LOCAL_HOLIDAYS_COLOR } from "@/lib/holidays/service";
 import { renameGoogleAccount, renameGoogleCalendar } from "@/lib/google-calendar/sync-service";
 import { type ItemColorPreferences, DEFAULT_ITEM_COLORS, type ItemStylesPreferences, DEFAULT_ITEM_STYLES } from "@/lib/calendar/item-color";
 
@@ -42,6 +43,9 @@ export interface CalendarSidebarProps {
 
   localCalendarEnabled: boolean;
   onToggleLocalCalendar: () => void;
+  /** Built-in Holidays calendar (independent of Google Calendar). */
+  localHolidaysEnabled?: boolean;
+  onToggleLocalHolidays?: () => void;
   googleStatus: GoogleIntegrationStatus | null;
   calendarConfigs: Record<string, GoogleCalendarConfig>;
   onToggleCalendar: (calendarId: string) => void;
@@ -73,6 +77,8 @@ export function CalendarSidebar({
   onAddAppointmentSchedule,
   localCalendarEnabled,
   onToggleLocalCalendar,
+  localHolidaysEnabled = true,
+  onToggleLocalHolidays,
   googleStatus,
   calendarConfigs,
   onToggleCalendar,
@@ -652,7 +658,7 @@ export function CalendarSidebar({
                 {myCalendarsOpen ? <CaretDown size={12} weight="bold" /> : <CaretRight size={12} weight="bold" />}
               </span>
               <span className="section-title">My Calendars</span>
-              <span className="section-count">{1 + myCalendars.length}</span>
+              <span className="section-count">{1 + (onToggleLocalHolidays ? 1 : 0) + myCalendars.length}</span>
             </button>
 
             {myCalendarsOpen && (
@@ -678,6 +684,27 @@ export function CalendarSidebar({
                     <span className="calendar-badge badge-local">Local</span>
                   </div>
                 </div>
+
+                {/* Built-in Holidays calendar (own colour, no Google account needed) */}
+                {onToggleLocalHolidays && (
+                  <div className="calendar-item-row local-calendar-row">
+                    <label className="calendar-item-clickable">
+                      <input
+                        type="checkbox"
+                        checked={localHolidaysEnabled}
+                        onChange={onToggleLocalHolidays}
+                        className="calendar-checkbox"
+                      />
+                      <span className="calendar-color-swatch" style={{ backgroundColor: LOCAL_HOLIDAYS_COLOR }} />
+                      <div className="calendar-item-info">
+                        <span className="calendar-item-name" title="Holidays">Holidays</span>
+                      </div>
+                    </label>
+                    <div className="calendar-item-trailing">
+                      <span className="calendar-badge badge-local">Local</span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Primary Google Calendars */}
                 {myCalendars.map((cal) => renderCalendarRow(cal, false))}
