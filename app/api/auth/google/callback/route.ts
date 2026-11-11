@@ -4,6 +4,8 @@ import { verifySignedOAuthState } from "@/lib/server/crypto";
 import { exchangeOAuthCode } from "@/lib/server/google-calendar";
 import { saveEncryptedCredentials } from "@/lib/server/google-token-store";
 import { resolveAppBaseUrl } from "@/lib/server/app-url";
+import { classifyOAuthCallbackError } from "@/lib/server/oauth-callback-error";
+import { isFirestoreConfigured } from "@/lib/server/firestore-store";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +36,7 @@ export async function GET(request: Request) {
     return NextResponse.redirect(redirectUrl.toString());
   }
 
+  let stage: "exchange" | "save" = "exchange";
   try {
     // 2. Verify authenticated session
     const session = await getVerifiedSession();
@@ -54,6 +57,7 @@ export async function GET(request: Request) {
 
     // 4. Exchange authorization code for tokens
     const tokenResult = await exchangeOAuthCode(code);
+    stage = "save";
     const now = new Date().toISOString();
     const accountId = tokenResult.userEmail || "primary";
 
@@ -94,9 +98,10 @@ export async function GET(request: Request) {
     return response;
   } catch (err) {
     const message = err instanceof Error ? err.message : "Token exchange failed.";
-    console.error("[Auth/GoogleCallback] Exchange failed:", message, err);
+    const code = classifyOAuthCallbackError(err, stage, isFirestoreConfigured());
+    console.error(`[Auth/GoogleCallback] ${stage} failed (${code}):`, message, err);
     const redirectUrl = new URL("/", baseUrl);
-    redirectUrl.searchParams.set("gcal_error", "token_exchange_failed");
+    redirectUrl.searchParams.set("gcal_error", code);
     return NextResponse.redirect(redirectUrl.toString());
   }
 }
