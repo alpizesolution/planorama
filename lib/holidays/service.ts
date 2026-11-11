@@ -65,7 +65,10 @@ function buildPhilippines(year: number, regionCode: string | null): HolidayDatas
     return {
       ...base,
       status: "official",
-      sourceLabel: official.proclamation,
+      sourceLabel:
+        official.supplements && official.supplements.length > 0
+          ? `${official.proclamation}; ${official.supplements.join("; ")}`
+          : official.proclamation,
       sourceUrl: official.url,
       pendingProclamations: official.pendingProclamations,
       note:

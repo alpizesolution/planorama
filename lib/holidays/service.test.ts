@@ -54,6 +54,8 @@ describe("Philippine 2026 dataset (Proclamation No. 1006)", () => {
   it("is marked official and cites the proclamation", () => {
     expect(dataset.status).toBe("official");
     expect(dataset.sourceLabel).toContain("Proclamation No. 1006");
+    expect(dataset.sourceLabel).toContain("No. 1189");
+    expect(dataset.sourceLabel).toContain("No. 1264");
     expect(dataset.timeZone).toBe("Asia/Manila");
   });
 
@@ -61,10 +63,12 @@ describe("Philippine 2026 dataset (Proclamation No. 1006)", () => {
     const regular = dataset.holidays.filter((h) => h.classification === "regular").map((h) => `${h.date} ${h.name}`);
     expect(regular).toEqual([
       "2026-01-01 New Year's Day",
+      "2026-03-20 Eid'l Fitr",
       "2026-04-02 Maundy Thursday",
       "2026-04-03 Good Friday",
       "2026-04-09 Araw ng Kagitingan",
       "2026-05-01 Labor Day",
+      "2026-05-27 Eid'l Adha",
       "2026-06-12 Independence Day",
       "2026-08-31 National Heroes Day",
       "2026-11-30 Bonifacio Day",
@@ -97,10 +101,19 @@ describe("Philippine 2026 dataset (Proclamation No. 1006)", () => {
     ]);
   });
 
-  it("does not list Eid'l Fitr / Eid'l Adha until they are officially proclaimed", () => {
-    expect(dataset.holidays.some((h) => /eid/i.test(h.name))).toBe(false);
-    expect(dataset.pendingProclamations).toEqual(["Eid'l Fitr", "Eid'l Adha"]);
-    expect(dataset.note).toMatch(/not listed until officially proclaimed/i);
+  it("lists Eid'l Fitr and Eid'l Adha only on the dates in their proclamations", () => {
+    const eid = dataset.holidays.filter((h) => /eid/i.test(h.name));
+    expect(eid).toEqual([
+      { date: "2026-03-20", name: "Eid'l Fitr", classification: "regular" },
+      { date: "2026-05-27", name: "Eid'l Adha", classification: "regular" },
+    ]);
+    expect(dataset.pendingProclamations).toEqual([]);
+  });
+
+  it("does not guess Eid dates for years without a proclamation", () => {
+    const d = getHolidayDataset("PH", 2027);
+    expect(d.holidays.some((h) => /eid/i.test(h.name))).toBe(false);
+    expect(d.pendingProclamations).toEqual(expect.arrayContaining(["Eid'l Fitr", "Eid'l Adha"]));
   });
 
   it("has unique dates + names, sorted chronologically", () => {
@@ -139,6 +152,7 @@ describe("year-specific datasets", () => {
     expect(a.every((t) => t.dueDate?.startsWith("2026-"))).toBe(true);
     expect(b.every((t) => t.dueDate?.startsWith("2027-"))).toBe(true);
     expect(a.length).toBe(PH_OFFICIAL_YEARS[2026].holidays.length);
+    expect(a.length).toBe(21);
     expect(buildLocalHolidayTasks(prefs, [2026]).map((t) => t.id)).toEqual(a.map((t) => t.id));
   });
 
