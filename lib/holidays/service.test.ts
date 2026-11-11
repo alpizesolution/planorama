@@ -17,6 +17,7 @@ import {
   isLocalHolidayTask,
   mergeLocalHolidays,
   refreshHolidayCache,
+  resolveHolidayColor,
   resolveLocalHolidayPreferences,
 } from "./service";
 
@@ -354,5 +355,48 @@ describe("Holidays page data", () => {
     const page = fs.readFileSync(path.join(root, "app/page.tsx"), "utf-8");
     expect(page).toMatch(/mergeLocalHolidays\(/);
     expect((page.match(/tasks=\{calendarItems\}/g) ?? []).length).toBeGreaterThanOrEqual(6);
+  });
+});
+
+describe("customisable holiday colour", () => {
+  it("uses the user's colour for every holiday tile, with readable text", () => {
+    const dark = buildLocalHolidayTasks({ ...prefs, color: "#1d4ed8" }, [2026]);
+    expect(dark.every((t) => t.color === "#1d4ed8" && t.textColor === "#ffffff")).toBe(true);
+    const light = buildLocalHolidayTasks({ ...prefs, color: "#fde047" }, [2026]);
+    expect(light.every((t) => t.color === "#fde047" && t.textColor !== "#ffffff")).toBe(true);
+  });
+
+  it("falls back to the default red when the colour is missing or invalid", () => {
+    expect(resolveHolidayColor(undefined)).toBe("#e63946");
+    expect(resolveHolidayColor("red")).toBe("#e63946");
+    expect(resolveHolidayColor("#ABCDEF")).toBe("#abcdef");
+    expect(buildLocalHolidayTasks({ ...prefs, color: "nope" }, [2026])[0].color).toBe("#e63946");
+  });
+
+  it("keeps a valid saved colour and drops an invalid one", () => {
+    expect(resolveLocalHolidayPreferences({ color: "#16A34A" }).color).toBe("#16a34a");
+    expect(resolveLocalHolidayPreferences({ color: "<script>" }).color).toBeUndefined();
+  });
+
+  it("a colour change does not change ids (no duplicates, just a recolour)", () => {
+    const a = buildLocalHolidayTasks(prefs, [2026]).map((t) => t.id);
+    const b = buildLocalHolidayTasks({ ...prefs, color: "#16a34a" }, [2026]).map((t) => t.id);
+    expect(b).toEqual(a);
+  });
+});
+
+describe("Year and Yearline views", () => {
+  const root = path.resolve(__dirname, "../..");
+  it("the Year view marks holiday days in the holiday colour", () => {
+    const year = fs.readFileSync(path.join(root, "app/components/calendar/year-view.tsx"), "utf-8");
+    expect(year).toMatch(/isHoliday/);
+    expect(year).toMatch(/has-holiday/);
+  });
+
+  it("the Yearline renders from the merged list (holidays included) but counts only real tasks", () => {
+    const page = fs.readFileSync(path.join(root, "app/page.tsx"), "utf-8");
+    expect(page).toMatch(/for \(const t of calendarItems\)/);
+    expect(page).toMatch(/yearline-holiday-item/);
+    expect(page).toMatch(/const dayTasks = dayItems\.filter\(\(t\) => !t\.isHoliday\)/);
   });
 });

@@ -46,6 +46,7 @@ export interface CalendarSidebarProps {
   /** Built-in Holidays calendar (independent of Google Calendar). */
   localHolidaysEnabled?: boolean;
   onToggleLocalHolidays?: () => void;
+  localHolidaysColor?: string;
   googleStatus: GoogleIntegrationStatus | null;
   calendarConfigs: Record<string, GoogleCalendarConfig>;
   onToggleCalendar: (calendarId: string) => void;
@@ -79,6 +80,7 @@ export function CalendarSidebar({
   onToggleLocalCalendar,
   localHolidaysEnabled = true,
   onToggleLocalHolidays,
+  localHolidaysColor = LOCAL_HOLIDAYS_COLOR,
   googleStatus,
   calendarConfigs,
   onToggleCalendar,
@@ -695,7 +697,7 @@ export function CalendarSidebar({
                         onChange={onToggleLocalHolidays}
                         className="calendar-checkbox"
                       />
-                      <span className="calendar-color-swatch" style={{ backgroundColor: LOCAL_HOLIDAYS_COLOR }} />
+                      <span className="calendar-color-swatch" style={{ backgroundColor: localHolidaysColor }} />
                       <div className="calendar-item-info">
                         <span className="calendar-item-name" title="Holidays">Holidays</span>
                       </div>

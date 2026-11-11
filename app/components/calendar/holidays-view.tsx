@@ -28,7 +28,8 @@ import {
   holidayNamesMatch,
   holidayEntryToTask,
   listSupportedCountries,
-  LOCAL_HOLIDAYS_COLOR,
+  HOLIDAY_COLOR_PRESETS,
+  resolveHolidayColor,
 } from "@/lib/holidays/service";
 import type { LocalHolidayPreferences } from "@/lib/holidays/types";
 import { CalendarWorkspaceHeader } from "./calendar-workspace-header";
@@ -116,6 +117,7 @@ export function HolidaysView({
   allCalendarConfigs,
   resolvedTheme,
 }: HolidaysViewProps) {
+  const holidayColor = resolveHolidayColor(localHolidayPrefs.color);
   const currentYear = Number(todayKey.slice(0, 4)) || today.getFullYear();
   const [year, setYear] = useState(currentYear);
   const [search, setSearch] = useState("");
@@ -216,7 +218,7 @@ export function HolidaysView({
   const sourceCalendars = useMemo(() => {
     const seen = new Set<string>();
     const result: Array<{ id: string; name: string; color: string }> = [
-      { id: "local-holidays", name: dataset.calendarName, color: LOCAL_HOLIDAYS_COLOR },
+      { id: "local-holidays", name: dataset.calendarName, color: holidayColor },
     ];
     for (const h of googleExtras) {
       const key = h.googleCalendarId ?? h.googleCalendarName ?? "";
@@ -231,7 +233,7 @@ export function HolidaysView({
       }
     }
     return result;
-  }, [googleExtras, allCalendarConfigs, dataset.calendarName]);
+  }, [googleExtras, allCalendarConfigs, dataset.calendarName, holidayColor]);
 
   const hasActiveFilters = filter !== "all" || search.trim() !== "";
   const clearFilters = () => {
@@ -303,6 +305,35 @@ export function HolidaysView({
             </select>
           </label>
         )}
+        <div className="hol-color-control" role="group" aria-label="Holiday tile colour">
+          <span>Colour</span>
+          <input
+            type="color"
+            className="hol-color-input"
+            value={holidayColor}
+            onChange={(e) => onChangeLocalHolidayPrefs({ color: e.target.value })}
+            aria-label="Choose holiday colour"
+          />
+          {HOLIDAY_COLOR_PRESETS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              className={`hol-color-swatch${c === holidayColor ? " is-active" : ""}`}
+              style={{ backgroundColor: c }}
+              onClick={() => onChangeLocalHolidayPrefs({ color: c })}
+              aria-label={`Use colour ${c}`}
+              aria-pressed={c === holidayColor}
+            />
+          ))}
+          <button
+            type="button"
+            className="hol-color-reset"
+            onClick={() => onChangeLocalHolidayPrefs({ color: undefined })}
+            disabled={!localHolidayPrefs.color}
+          >
+            Reset
+          </button>
+        </div>
         <span className="hol-control-region">{regionLabel} · {dataset.timeZone}</span>
         <button type="button" className="hol-refresh-btn" onClick={onRefreshLocalHolidays}>
           <ArrowsClockwise size={13} weight="bold" /> Refresh
@@ -551,7 +582,7 @@ export function HolidaysView({
                                       <CalendarBlank
                                         size={12}
                                         weight="bold"
-                                        color={isLocal ? LOCAL_HOLIDAYS_COLOR : calCfg?.color ?? holiday.googleCalendarColor ?? catColor}
+                                        color={isLocal ? holidayColor : calCfg?.color ?? holiday.googleCalendarColor ?? catColor}
                                       />
                                       {calName}
                                     </span>

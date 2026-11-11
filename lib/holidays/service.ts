@@ -1,5 +1,6 @@
 import type { PlannerTask } from "@/lib/schedule/types";
 import { HOLIDAY_CATEGORY_LABELS } from "@/lib/calendar/holiday-utils";
+import { getContrastingTextColor, isValidHexColor } from "@/lib/calendar/item-color";
 import {
   PH_DATASET_VERSION,
   PH_OFFICIAL_YEARS,
@@ -19,6 +20,14 @@ import {
 /** Dedicated colour for the "Holidays" calendar source. */
 export const LOCAL_HOLIDAYS_COLOR = "#e63946";
 export const LOCAL_HOLIDAYS_TEXT_COLOR = "#ffffff";
+
+/** Quick picks offered next to the colour picker. */
+export const HOLIDAY_COLOR_PRESETS = ["#e63946", "#f4a261", "#2a9d8f", "#457b9d", "#7b2d8b", "#ff3d8b", "#16a34a", "#111111"];
+
+/** The colour holiday tiles use: the user's choice when valid, otherwise the default. */
+export function resolveHolidayColor(color?: string | null): string {
+  return typeof color === "string" && isValidHexColor(color) ? color.toLowerCase() : LOCAL_HOLIDAYS_COLOR;
+}
 export const LOCAL_HOLIDAYS_CALENDAR_NAME = "Holidays";
 
 const CACHE_PREFIX = "planorama:local-holidays:v1:";
@@ -112,6 +121,7 @@ export function resolveLocalHolidayPreferences(raw: unknown): LocalHolidayPrefer
         ? parsed.countryCode.trim().toUpperCase()
         : DEFAULT_LOCAL_HOLIDAY_PREFERENCES.countryCode,
     regionCode: typeof parsed.regionCode === "string" && parsed.regionCode.trim() ? parsed.regionCode.trim() : null,
+    color: typeof parsed.color === "string" && isValidHexColor(parsed.color) ? parsed.color.toLowerCase() : undefined,
     lastRefreshedAt: typeof parsed.lastRefreshedAt === "string" ? parsed.lastRefreshedAt : undefined,
   };
 }
@@ -246,7 +256,12 @@ function describe(dataset: HolidayDataset, entry: LocalHolidayEntry): string {
  * (idempotent upsert): regenerating, refreshing or running a Google sync can
  * never create a second copy.
  */
-export function holidayEntryToTask(dataset: HolidayDataset, entry: LocalHolidayEntry): PlannerTask {
+export function holidayEntryToTask(
+  dataset: HolidayDataset,
+  entry: LocalHolidayEntry,
+  color: string = LOCAL_HOLIDAYS_COLOR
+): PlannerTask {
+  const tileColor = resolveHolidayColor(color);
   const stamp = `${dataset.year}-01-01T00:00:00.000Z`;
   return {
     id: `${LOCAL_HOLIDAY_ID_PREFIX}${dataset.countryCode}:${entry.date}:${slug(entry.name)}`,
@@ -267,8 +282,8 @@ export function holidayEntryToTask(dataset: HolidayDataset, entry: LocalHolidayE
     eventType: "holiday",
     itemType: "event",
     isReadOnlyCalendar: true,
-    color: LOCAL_HOLIDAYS_COLOR,
-    textColor: LOCAL_HOLIDAYS_TEXT_COLOR,
+    color: tileColor,
+    textColor: getContrastingTextColor(tileColor),
     holidaySource: "local",
     holidayCategory: entry.classification,
     holidayCountry: dataset.countryCode,
@@ -282,7 +297,7 @@ export function buildLocalHolidayTasks(prefs: LocalHolidayPreferences, years: nu
   for (const year of years) {
     const dataset = getHolidayDataset(prefs.countryCode, year, prefs.regionCode);
     for (const entry of dataset.holidays) {
-      const task = holidayEntryToTask(dataset, entry);
+      const task = holidayEntryToTask(dataset, entry, prefs.color);
       if (seen.has(task.id)) continue;
       seen.add(task.id);
       out.push(task);
