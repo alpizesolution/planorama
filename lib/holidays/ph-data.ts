@@ -6,7 +6,7 @@ import type { HolidayClassification, LocalHolidayEntry } from "./types";
  * Bump DATASET_VERSION whenever any data in this file changes so cached copies
  * are discarded.
  */
-export const PH_DATASET_VERSION = 1;
+export const PH_DATASET_VERSION = 2;
 
 export const PH_TIME_ZONE = "Asia/Manila";
 
@@ -22,6 +22,8 @@ const swd = (date: string, name: string): LocalHolidayEntry => ({ date, name, cl
 export interface PhOfficialYear {
   year: number;
   proclamation: string;
+  /** Later proclamations that add to (or amend) the main one, e.g. Eid'l Fitr / Eid'l Adha. */
+  supplements?: string[];
   url?: string;
   holidays: LocalHolidayEntry[];
   /**
@@ -40,17 +42,23 @@ export const PH_OFFICIAL_YEARS: Record<number, PhOfficialYear> = {
   2026: {
     year: 2026,
     proclamation: "Proclamation No. 1006, s. 2025",
+    supplements: ["Proclamation No. 1189, s. 2026 (Eid'l Fitr)", "Proclamation No. 1264, s. 2026 (Eid'l Adha)"],
     url: "https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/7/99678",
-    pendingProclamations: ["Eid'l Fitr", "Eid'l Adha"],
+    // Both were declared later (Nos. 1189 and 1264), so nothing is pending for 2026.
+    pendingProclamations: [],
     holidays: [
       reg("2026-01-01", "New Year's Day"),
       snw("2026-02-17", "Chinese New Year", true),
       swd("2026-02-25", "EDSA People Power Revolution Anniversary"),
+      // Proclamation No. 1189, s. 2026 (signed 12 March 2026): Eid'l Fitr, regular holiday.
+      reg("2026-03-20", "Eid'l Fitr"),
       reg("2026-04-02", "Maundy Thursday"),
       reg("2026-04-03", "Good Friday"),
       snw("2026-04-04", "Black Saturday", true),
       reg("2026-04-09", "Araw ng Kagitingan"),
       reg("2026-05-01", "Labor Day"),
+      // Proclamation No. 1264, s. 2026 (signed 21 May 2026): Eid'l Adha, regular holiday.
+      reg("2026-05-27", "Eid'l Adha"),
       reg("2026-06-12", "Independence Day"),
       snw("2026-08-21", "Ninoy Aquino Day"),
       reg("2026-08-31", "National Heroes Day"),

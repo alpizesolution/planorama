@@ -8,7 +8,6 @@ import {
   Plus,
   Sun,
   X,
-  DotsSixVertical,
   CaretDown,
   Gear,
 } from "@phosphor-icons/react";
@@ -335,8 +334,8 @@ export default function HomePage() {
   const [monthOffset, setMonthOffset] = useState(0);
   const [view, setView] = useState<AppView>(DEFAULT_VIEW);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  const [taskFilter, setTaskFilter] = useState<"all" | "open" | "completed">("all");
-  const [taskSearch, setTaskSearch] = useState("");
+  const [taskFilter] = useState<"all" | "open" | "completed">("all");
+  const [taskSearch] = useState("");
   const [taskSort, setTaskSort] = useState<"due" | "priority" | "newest">("due");
   const [preferences, setPreferences] = useState<PlannerPreferences>(DEFAULT_PREFERENCES);
   const resolvedTheme = useMemo(
@@ -354,7 +353,7 @@ export default function HomePage() {
       // ignore
     }
   }, []);
-  const [loaded, setLoaded] = useState(false);
+  const [, setLoaded] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
@@ -366,7 +365,7 @@ export default function HomePage() {
   const [newProjectId, setNewProjectId] = useState("");
   const [editProjectId, setEditProjectId] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
-  const [calendarFilter, setCalendarFilter] = useState("");
+  const [calendarFilter] = useState("");
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>("general");
   const [previousView, setPreviousView] = useState<AppView>(DEFAULT_VIEW);
 
@@ -428,7 +427,7 @@ export default function HomePage() {
   const [createModalMode, setCreateModalMode] = useState<CreateMode>("task");
   const [addTaskDueDate, setAddTaskDueDate] = useState<string | null>(null);
   const [addTaskDueTime, setAddTaskDueTime] = useState<string | null>(null);
-  const [addTaskStatus, setAddTaskStatus] = useState<PlannerTask["status"]>("open");
+  const [, setAddTaskStatus] = useState<PlannerTask["status"]>("open");
 
   const openCreateModal = useCallback((modalMode: CreateMode = "event", options?: { date?: string | null; time?: string | null; status?: PlannerTask["status"] }) => {
     setCreateModalMode(modalMode);
@@ -471,7 +470,7 @@ export default function HomePage() {
   const [editLocation, setEditLocation] = useState("");
 
   // Kanban drag state
-  const [dragTaskId, setDragTaskId] = useState<string | null>(null);
+  const [, setDragTaskId] = useState<string | null>(null);
 
   // Toast state
   const [toast, setToast] = useState<string | null>(null);

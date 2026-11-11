@@ -65,7 +65,10 @@ function buildPhilippines(year: number, regionCode: string | null): HolidayDatas
     return {
       ...base,
       status: "official",
-      sourceLabel: official.proclamation,
+      sourceLabel:
+        official.supplements && official.supplements.length > 0
+          ? `${official.proclamation}; ${official.supplements.join("; ")}`
+          : official.proclamation,
       sourceUrl: official.url,
       pendingProclamations: official.pendingProclamations,
       note:
@@ -403,4 +406,35 @@ export function holidayYearsAround(todayKey: string, before = 2, after = 3): num
   const years: number[] = [];
   for (let y = year - before; y <= year + after; y++) years.push(y);
   return years;
+}
+
+export interface HolidayNotice {
+  title: string;
+  dueDate: string;
+  /** 0 = today, 1 = tomorrow. */
+  daysAway: number;
+}
+
+/**
+ * Holidays that fall on `dateKey`, plus (for `lookaheadDays` > 0) the ones
+ * in the next few days. Used for the "today is a holiday" banner and the
+ * "holiday tomorrow" reminder. Items must be all-day holiday tasks.
+ */
+export function findHolidayNotices(
+  holidays: Array<{ title: string; dueDate: string | null }>,
+  dateKey: string,
+  lookaheadDays = 0
+): HolidayNotice[] {
+  const out: HolidayNotice[] = [];
+  const seen = new Set<string>();
+  for (const h of holidays) {
+    if (!h.dueDate) continue;
+    const away = daysBetween(dateKey, h.dueDate);
+    if (away < 0 || away > lookaheadDays) continue;
+    const key = `${h.dueDate}|${h.title.trim().toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ title: h.title, dueDate: h.dueDate, daysAway: away });
+  }
+  return out.sort((a, b) => a.daysAway - b.daysAway || a.title.localeCompare(b.title));
 }
