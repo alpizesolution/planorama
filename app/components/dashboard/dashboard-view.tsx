@@ -1,5 +1,6 @@
 "use client";
 
+import { HolidayBanner } from "../calendar/holiday-banner";
 import { useMemo, useRef, useState, useEffect } from "react";
 import {
   ArrowClockwise,
@@ -577,6 +578,7 @@ export function DashboardView({
 
   return (
     <div className="dashboard-container" id="dashboard-view">
+      <HolidayBanner tasks={tasks} dateKey={todayKey} todayKey={todayKey} lookaheadDays={1} />
       {/* Dashboard Page Header Toolbar with Dedicated Gear Button */}
       <div className="dashboard-header-toolbar">
         <div className="dashboard-header-left">

@@ -17685,3 +17685,17 @@ html, body {
 .hol-color-reset:disabled{opacity:.45;cursor:default}
 .yearline-holiday-list{margin-bottom:2px}
 .yearline-holiday-item{pointer-events:auto;cursor:default}
+
+/* Holiday banner (Day, Week, Dashboard) */
+.holiday-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 2px solid var(--holiday-banner-border, #1a1a1a);
+  background: var(--holiday-banner-bg, #fff1f2);
+  color: var(--holiday-banner-fg, #1a1a1a);
+  font-size: 0.85rem;
+}
+.holiday-banner-item.is-now { font-weight: 700; }

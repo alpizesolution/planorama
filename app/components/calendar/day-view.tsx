@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { HolidayBanner } from "./holiday-banner";
 import {
   Plus,
   Lock,
@@ -259,6 +260,8 @@ export function DayView({
         onDatePickerChange={(date) => onSelectDate(date)}
         datePickerAriaLabel="Jump to date"
       />
+
+      <HolidayBanner tasks={tasks} dateKey={currentDateKey} todayKey={todayKey} />
 
       {/* 1b. Daily progress trackers, overall completion and summary for the selected date */}
       <DailyProgressPanel progress={dailyProgress} />
