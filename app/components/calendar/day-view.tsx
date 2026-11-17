@@ -55,6 +55,7 @@ export interface DayViewProps {
   itemStyles?: ItemStylesPreferences;
   onAddTask: (options?: { date?: string | null; time?: string | null; status?: PlannerTask["status"] }) => void;
   onOpenTaskDetail: (task: PlannerTask) => void;
+  onToggleTask?: (task: PlannerTask) => Promise<void>;
   onToggleMobileSidebar?: () => void;
   activeCalendarCount?: number;
   currentView?: DayAppView;
@@ -107,6 +108,7 @@ export function DayView({
   itemStyles = DEFAULT_ITEM_STYLES,
   onAddTask,
   onOpenTaskDetail,
+  onToggleTask,
   activeCalendarCount = 0,
   habits = [],
   habitCheckIns = [],
@@ -311,6 +313,11 @@ export function DayView({
                       }
                     }}
                   >
+                    {itemType === "task" && !isReadOnly && onToggleTask && (
+                      <button type="button" className="day-task-completion-toggle" aria-label={item.status === "completed" ? "Mark task as incomplete" : "Mark task as complete"} title={item.status === "completed" ? "Mark task as incomplete" : "Mark task as complete"} onClick={(e) => { e.stopPropagation(); void onToggleTask(item); }}>
+                        {item.status === "completed" ? <CheckCircle size={16} weight="fill" /> : <Circle size={16} />}
+                      </button>
+                    )}
                     <span
                       className="allday-pill-dot"
                       style={{ backgroundColor: tileStyle.indicatorColor }}
@@ -464,6 +471,11 @@ export function DayView({
                 >
                   <div className="timeline-event-header">
                     <div className="timeline-event-title-wrap">
+                      {itemType === "task" && !isReadOnly && onToggleTask && (
+                        <button type="button" className="day-task-completion-toggle" aria-label={task.status === "completed" ? "Mark task as incomplete" : "Mark task as complete"} title={task.status === "completed" ? "Mark task as incomplete" : "Mark task as complete"} onClick={(e) => { e.stopPropagation(); void onToggleTask(task); }}>
+                          {task.status === "completed" ? <CheckCircle size={16} weight="fill" /> : <Circle size={16} />}
+                        </button>
+                      )}
                       {task.isPinned && <span className="event-pin" title="Pinned">📌</span>}
                       {isAppointment ? (
                         <Clock size={12} weight="bold" style={{ color: tileStyle.indicatorColor, flexShrink: 0, marginRight: 3 }} />

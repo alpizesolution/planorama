@@ -311,6 +311,7 @@ function TaskPriorityOrgControl({
 
 export default function HomePage() {
   const [tasks, setTasks] = useState<PlannerTask[]>([]);
+  const taskToggleInFlight = useRef(new Set<string>());
   const [newTask, setNewTask] = useState("");
   const [newNotes, setNewNotes] = useState("");
   const [newDueDate, setNewDueDate] = useState("");
@@ -1719,6 +1720,8 @@ export default function HomePage() {
 
   async function toggleTask(task: PlannerTask) {
     if (isLocalHolidayTask(task)) return; // generated, read-only
+    if (taskToggleInFlight.current.has(task.id)) return;
+    taskToggleInFlight.current.add(task.id);
     const updated = { ...task, status: task.status === "completed" ? "open" as const : "completed" as const };
     setTasks((current) => current.map((item) => item.id === task.id ? updated : item));
     try {
@@ -1747,6 +1750,8 @@ export default function HomePage() {
     } catch {
       setTasks((current) => current.map((item) => item.id === task.id ? task : item));
       setSaveError("Your change could not be saved.");
+    } finally {
+      taskToggleInFlight.current.delete(task.id);
     }
   }
 
@@ -2778,6 +2783,7 @@ export default function HomePage() {
                 })
               }
               onOpenTaskDetail={openTaskDetail}
+              onToggleTask={toggleTask}
               activeCalendarCount={activeCalendarCount}
               currentView={view}
               itemColors={preferences.itemColors ?? DEFAULT_ITEM_COLORS}

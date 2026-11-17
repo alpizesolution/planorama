@@ -8715,6 +8715,21 @@ html, body {
   text-decoration: line-through;
 }
 
+.day-task-completion-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink, #1e1e24);
+  cursor: pointer;
+}
+.day-task-completion-toggle:hover { color: #15803d; transform: scale(1.08); }
+.day-task-completion-toggle:focus-visible { outline: 2px solid var(--blue, #5b7cfa); outline-offset: 2px; }
+
 .allday-pill-dot {
   width: 8px;
   height: 8px;
