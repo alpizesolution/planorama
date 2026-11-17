@@ -114,7 +114,7 @@ export function WeekView({
   const dailyTaskProgress = useMemo(() => {
     const progress = new Map<string, { completed: number; total: number; percent: number }>();
     for (const dateKey of weekDateKeys) {
-      const dayTasks = tasks.filter((task) => task.dueDate === dateKey && isTaskItem(task));
+      const dayTasks = tasks.filter((task) => task.dueDate === dateKey && isTaskItem(task) && !task.isSkipped && !task.isCanceled);
       const completed = dayTasks.filter((task) => task.status === "completed").length;
       const total = dayTasks.length;
       progress.set(dateKey, { completed, total, percent: total > 0 ? Math.round((completed / total) * 100) : 0 });

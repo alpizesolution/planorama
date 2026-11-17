@@ -332,6 +332,7 @@ export default function HomePage() {
   const [editIsPersonal, setEditIsPersonal] = useState(false);
   const [editTimingPreference, setEditTimingPreference] = useState<"scheduled" | "whenever">("scheduled");
   const [editRecurrence, setEditRecurrence] = useState<PlannerTask["recurrence"]>("none");
+  const [editRecurrenceScope, setEditRecurrenceScope] = useState<"occurrence" | "following" | "series">("occurrence");
   const [editStatus, setEditStatus] = useState<PlannerTask["status"]>("open");
   const [monthOffset, setMonthOffset] = useState(0);
   const [view, setView] = useState<AppView>(DEFAULT_VIEW);
@@ -1649,6 +1650,7 @@ export default function HomePage() {
     setEditIsPersonal(Boolean(task.isPersonal));
     setEditTimingPreference(task.timingPreference ?? "scheduled");
     setEditRecurrence(task.recurrence ?? "none");
+    setEditRecurrenceScope("occurrence");
     setEditLabelIds(task.labelIds ?? []);
     setEditProjectId(task.projectId ?? "");
     setEditStatus(task.status);
@@ -1678,7 +1680,7 @@ export default function HomePage() {
       isPinned: editIsPinned,
       isPersonal: editIsPersonal,
       timingPreference: editTimingPreference,
-      recurrence: editRecurrence,
+      recurrence: task.recurrence !== "none" && editRecurrenceScope === "occurrence" ? "none" : editRecurrence,
       labelIds: editLabelIds,
       projectId: editProjectId || null,
       status: editStatus,
@@ -1687,7 +1689,13 @@ export default function HomePage() {
     if (updated.recurrence !== "none" && !updated.dueDate) { setSaveError("Choose a due date for a recurring task."); return; }
     try {
       const saved = await updateTask(updated);
-      setTasks((current) => current.map((item) => item.id === task.id ? saved : item));
+      const seriesId = task.seriesId ?? task.id;
+      const scopeTargets = editRecurrenceScope === "occurrence"
+        ? []
+        : tasks.filter((item) => (item.seriesId ?? item.id) === seriesId && (editRecurrenceScope === "series" || !task.dueDate || (item.dueDate ?? "") >= task.dueDate));
+      const propagated = scopeTargets.map((item) => item.status === "completed" && item.id !== task.id ? item : { ...item, title: saved.title, notes: saved.notes, location: saved.location, priority: saved.priority, isPinned: saved.isPinned, isPersonal: saved.isPersonal, timingPreference: saved.timingPreference, recurrence: saved.recurrence, recurrenceConfig: saved.recurrenceConfig });
+      await Promise.all(propagated.filter((item) => item.id !== saved.id).map((item) => updateTask(item)));
+      setTasks((current) => current.map((item) => item.id === task.id ? saved : propagated.find((next) => next.id === item.id) ?? item));
       setEditingId(null);
       setDetailTaskId(null);
       setSaveError("");
@@ -1720,7 +1728,9 @@ export default function HomePage() {
       if (updated.status === "completed" && task.status !== "completed") {
         const nextTask = nextOccurrenceTask(updated);
         const alreadyExists = nextTask && tasks.some((item) => item.id === nextTask.id || (item.seriesId === nextTask.seriesId && item.occurrenceDate === nextTask.occurrenceDate));
-        if (nextTask && !alreadyExists) {
+        const maxOccurrences = updated.recurrenceConfig?.maxOccurrences;
+        const seriesCount = tasks.filter((item) => (item.seriesId ?? item.id) === (updated.seriesId ?? updated.id)).length;
+        if (nextTask && !alreadyExists && (!maxOccurrences || seriesCount < maxOccurrences)) {
           const created = await createTask(nextTask);
           setTasks((current) => [...current, created]);
         }
@@ -1731,6 +1741,31 @@ export default function HomePage() {
       setSaveError("Your change could not be saved.");
     } finally {
       taskToggleInFlight.current.delete(task.id);
+    }
+  }
+
+  async function markOccurrence(task: PlannerTask, kind: "skip" | "cancel") {
+    if (task.recurrence === "none" || task.isSkipped || task.isCanceled) return;
+    const message = kind === "skip"
+      ? "Skip this occurrence? The recurring series will continue."
+      : "Cancel this occurrence? The recurring series will continue, but this occurrence will remain canceled.";
+    if (!window.confirm(message)) return;
+    const updated = { ...task, isSkipped: kind === "skip", isCanceled: kind === "cancel", status: "open" as const };
+    setTasks((current) => current.map((item) => item.id === task.id ? updated : item));
+    try {
+      await updateTask(updated);
+      const nextTask = nextOccurrenceTask(task);
+      const maxOccurrences = task.recurrenceConfig?.maxOccurrences;
+      const seriesCount = tasks.filter((item) => (item.seriesId ?? item.id) === (task.seriesId ?? task.id)).length;
+      if (nextTask && !tasks.some((item) => item.seriesId === nextTask.seriesId && item.occurrenceDate === nextTask.occurrenceDate) && (!maxOccurrences || seriesCount < maxOccurrences)) {
+        const created = await createTask(nextTask);
+        setTasks((current) => [...current, created]);
+      }
+      setDetailTaskId(null);
+      showToast(kind === "skip" ? "Occurrence skipped." : "Occurrence canceled.");
+    } catch {
+      setTasks((current) => current.map((item) => item.id === task.id ? task : item));
+      setSaveError("The occurrence could not be updated.");
     }
   }
 
@@ -3056,6 +3091,15 @@ export default function HomePage() {
                       <option value="none">Does not repeat</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option>
                     </select>
                   </label>
+                  {detailTask.recurrence !== "none" && (
+                    <label className="detail-label">Apply changes to
+                      <select value={editRecurrenceScope} onChange={(e) => setEditRecurrenceScope(e.target.value as typeof editRecurrenceScope)}>
+                        <option value="occurrence">This occurrence only</option>
+                        <option value="following">This and following</option>
+                        <option value="series">Entire series</option>
+                      </select>
+                    </label>
+                  )}
                   {!isEvent && (
                     <label className="detail-label">Project
                       <select value={editProjectId} onChange={(e) => setEditProjectId(e.target.value)}>
@@ -3082,6 +3126,12 @@ export default function HomePage() {
                 )}
                 {saveError && <p className="save-error" role="status">{saveError}</p>}
                 <div className="detail-actions">
+                  {!isEvent && detailTask.recurrence !== "none" && !detailTask.isSkipped && !detailTask.isCanceled && (
+                    <>
+                      <button type="button" className="task-action" onClick={() => void markOccurrence(detailTask, "skip")}>Skip occurrence</button>
+                      <button type="button" className="task-action" onClick={() => void markOccurrence(detailTask, "cancel")}>Cancel occurrence</button>
+                    </>
+                  )}
                   <button type="submit" className="task-action save">Save changes</button>
                   <button type="button" className="task-action delete" onClick={() => void deleteTask(detailTask)}>Delete</button>
                   <button type="button" className="task-action" onClick={() => { setDetailTaskId(null); setEditingId(null); }}>Cancel</button>

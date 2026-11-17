@@ -37,6 +37,7 @@ export type PlannerTask = {
   occurrenceDate?: string;
   originalDueDate?: string | null;
   isSkipped?: boolean;
+  isCanceled?: boolean;
   createdAt: string;
   updatedAt: string;
   isPinned?: boolean;
