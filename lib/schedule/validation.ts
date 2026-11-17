@@ -62,6 +62,7 @@ export function validateNewTask(value: NewPlannerTask): Omit<PlannerTask, "id" |
     occurrenceDate: value.occurrenceDate,
     originalDueDate: value.originalDueDate,
     isSkipped: value.isSkipped,
+    isCanceled: value.isCanceled,
     isPinned,
     isPersonal,
     timingPreference,

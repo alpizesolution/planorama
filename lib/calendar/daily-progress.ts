@@ -58,7 +58,7 @@ function count(completed: number, total: number): ProgressCount {
 }
 
 export function isCancelledItem(item: Partial<PlannerTask>): boolean {
-  return item.eventStatus === "cancelled";
+  return item.eventStatus === "cancelled" || item.isCanceled === true || item.isSkipped === true;
 }
 
 export function getDayItemKind(item: PlannerTask): DayItemKind {
