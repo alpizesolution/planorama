@@ -615,6 +615,11 @@ export function WeekView({
                                 }}
                                 title={`${item.title}${item.googleCalendarName ? ` (${item.googleCalendarName})` : ""}`}
                               >
+                                {isTaskItem(item) && !isReadOnly && onToggleTask && (
+                                  <button type="button" className="day-task-completion-toggle" aria-label={item.status === "completed" ? "Mark task as incomplete" : "Mark task as complete"} title={item.status === "completed" ? "Mark task as incomplete" : "Mark task as complete"} onClick={(e) => { e.stopPropagation(); void onToggleTask(item); }}>
+                                    {item.status === "completed" ? <CheckCircle size={16} weight="fill" /> : <Circle size={16} />}
+                                  </button>
+                                )}
                                 <span className="allday-pill-dot" style={{ backgroundColor: tileStyle.indicatorColor }} />
                                 <span className="allday-pill-title">{item.title}</span>
                                 {item.isGoogleEvent ? (
@@ -776,6 +781,11 @@ export function WeekView({
                             >
                               <div className="week-event-card-top">
                                 <div className="week-event-title-wrap">
+                                  {isTaskItem(task) && !isReadOnly && onToggleTask && (
+                                    <button type="button" className="day-task-completion-toggle" aria-label={task.status === "completed" ? "Mark task as incomplete" : "Mark task as complete"} title={task.status === "completed" ? "Mark task as incomplete" : "Mark task as complete"} onClick={(e) => { e.stopPropagation(); void onToggleTask(task); }}>
+                                      {task.status === "completed" ? <CheckCircle size={16} weight="fill" /> : <Circle size={16} />}
+                                    </button>
+                                  )}
                                   {task.isPinned && <span className="event-pin" title="Pinned">📌</span>}
                                   {isAppointment ? (
                                     <Clock size={11} weight="bold" style={{ color: tileStyle.indicatorColor, flexShrink: 0, marginRight: 2 }} />
