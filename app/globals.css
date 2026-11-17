@@ -8720,8 +8720,10 @@ html, body {
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
   padding: 0;
-  border: 0;
+  border: 1.5px solid currentColor;
   border-radius: 50%;
   background: transparent;
   color: var(--ink, #1e1e24);

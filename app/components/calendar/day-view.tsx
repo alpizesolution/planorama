@@ -21,6 +21,7 @@ import type { Habit, HabitCheckIn } from "@/lib/habits/types";
 import { computeDailyProgress, getDayItemState, type DayItemState } from "@/lib/calendar/daily-progress";
 import { DailyProgressPanel } from "./daily-progress-panel";
 import { type ResolvedCalendarTheme } from "@/lib/calendar/calendar-themes";
+import { isTaskItem } from "@/lib/calendar/item-classifier";
 import {
   getItemType,
   type ItemColorPreferences,
@@ -313,7 +314,7 @@ export function DayView({
                       }
                     }}
                   >
-                    {itemType === "task" && !isReadOnly && onToggleTask && (
+                    {isTaskItem(item) && !isReadOnly && onToggleTask && (
                       <button type="button" className="day-task-completion-toggle" aria-label={item.status === "completed" ? "Mark task as incomplete" : "Mark task as complete"} title={item.status === "completed" ? "Mark task as incomplete" : "Mark task as complete"} onClick={(e) => { e.stopPropagation(); void onToggleTask(item); }}>
                         {item.status === "completed" ? <CheckCircle size={16} weight="fill" /> : <Circle size={16} />}
                       </button>
@@ -471,7 +472,7 @@ export function DayView({
                 >
                   <div className="timeline-event-header">
                     <div className="timeline-event-title-wrap">
-                      {itemType === "task" && !isReadOnly && onToggleTask && (
+                      {isTaskItem(task) && !isReadOnly && onToggleTask && (
                         <button type="button" className="day-task-completion-toggle" aria-label={task.status === "completed" ? "Mark task as incomplete" : "Mark task as complete"} title={task.status === "completed" ? "Mark task as incomplete" : "Mark task as complete"} onClick={(e) => { e.stopPropagation(); void onToggleTask(task); }}>
                           {task.status === "completed" ? <CheckCircle size={16} weight="fill" /> : <Circle size={16} />}
                         </button>
