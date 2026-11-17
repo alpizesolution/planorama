@@ -538,7 +538,10 @@ describe("PLANORAMA Weekly Workspace & Google Calendar Integration", () => {
       const content = fs.readFileSync(pagePath, "utf-8");
 
       // Month, Year, Agenda, Day, Week, Work Weeks, Board, Yearline are switched via setView from top nav
-      expect(content).toContain('setView(v.id)');
+      expect(content).toContain("<HeaderViewNav");
+      expect(content).toMatch(/onSelect=\{\(v\) => \{\s*setView\(v\);/);
+      const navContent = fs.readFileSync(path.resolve(__dirname, "../../app/components/header-view-nav.tsx"), "utf-8");
+      expect(navContent).toContain("onClick={() => select(v.id)}");
       // Confirm DayView and WeekView no longer receive onSwitchView prop
       expect(content).not.toContain('onSwitchView={(v) => setView(v)}');
     });

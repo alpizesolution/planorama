@@ -496,15 +496,15 @@ export function GoogleCalendarSettings({
           {/* Connected Accounts Manager (Virtual Assistant Multi-Account Support) */}
           <div className="google-accounts-manager-card" style={{
             background: "#fffdfa",
-            border: "2px solid #1c1917",
+            border: "2px solid var(--ink)",
             borderRadius: "10px",
             padding: "14px",
-            boxShadow: "3px 3px 0 #1c1917",
+            boxShadow: "3px 3px 0 var(--ink)",
             marginBottom: "16px",
           }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px", flexWrap: "wrap", gap: "8px" }}>
               <div>
-                <h5 style={{ margin: 0, fontSize: "13.5px", fontWeight: 800, color: "#1c1917" }}>
+                <h5 style={{ margin: 0, fontSize: "13.5px", fontWeight: 800, color: "var(--ink)" }}>
                   Connected Accounts ({status.accounts?.length || 1})
                 </h5>
                 <span style={{ fontSize: "11.5px", color: "#78716c" }}>
@@ -520,11 +520,11 @@ export function GoogleCalendarSettings({
                   gap: "5px",
                   padding: "5px 10px",
                   background: "#fff",
-                  border: "1.5px solid #1c1917",
+                  border: "1.5px solid var(--ink)",
                   borderRadius: "6px",
                   fontSize: "12px",
                   fontWeight: 700,
-                  boxShadow: "1.5px 1.5px 0 #1c1917",
+                  boxShadow: "1.5px 1.5px 0 var(--ink)",
                   cursor: "pointer",
                 }}
                 title="Connect an authorized client or additional Google Calendar"
@@ -557,7 +557,7 @@ export function GoogleCalendarSettings({
                         height: "28px",
                         borderRadius: "50%",
                         background: acc.isPrimary ? "#ffd84d" : "#7cc4ff",
-                        border: "1.5px solid #1c1917",
+                        border: "1.5px solid var(--ink)",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
@@ -574,7 +574,7 @@ export function GoogleCalendarSettings({
                           style={{
                             fontSize: "12.5px",
                             fontWeight: 700,
-                            color: "#1c1917",
+                            color: "var(--ink)",
                             overflow: "hidden",
                             textOverflow: "ellipsis",
                             whiteSpace: "nowrap",
@@ -608,11 +608,11 @@ export function GoogleCalendarSettings({
                       style={{
                         padding: "4px 8px",
                         background: "#fff",
-                        border: "1.5px solid #1c1917",
+                        border: "1.5px solid var(--ink)",
                         borderRadius: "6px",
                         fontSize: "11px",
                         fontWeight: 700,
-                        color: "#1c1917",
+                        color: "var(--ink)",
                         cursor: "pointer",
                         display: "flex",
                         alignItems: "center",
@@ -650,10 +650,10 @@ export function GoogleCalendarSettings({
           {/* Default Calendar for Newly Created Events */}
           <div style={{
             background: "#fffdfa",
-            border: "2px solid #1c1917",
+            border: "2px solid var(--ink)",
             borderRadius: "10px",
             padding: "12px 14px",
-            boxShadow: "3px 3px 0 #1c1917",
+            boxShadow: "3px 3px 0 var(--ink)",
             marginBottom: "16px",
             display: "flex",
             alignItems: "center",
@@ -662,7 +662,7 @@ export function GoogleCalendarSettings({
             gap: "10px",
           }}>
             <div>
-              <strong style={{ fontSize: "12.5px", color: "#1c1917" }}>Default Calendar for New Events:</strong>
+              <strong style={{ fontSize: "12.5px", color: "var(--ink)" }}>Default Calendar for New Events:</strong>
               <div style={{ fontSize: "11.5px", color: "#78716c" }}>
                 Newly created tasks with Google sync enabled will be saved to this calendar by default.
               </div>

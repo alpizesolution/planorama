@@ -21,6 +21,8 @@ import {
   Trash,
   ArrowRight,
   Keyboard,
+  ClipboardText,
+  Lightning,
 } from "@phosphor-icons/react";
 import type { PlannerTask, Priority } from "@/lib/schedule/types";
 import type { GoogleCalendarConfig } from "@/lib/google-calendar/types";
@@ -311,8 +313,8 @@ export function KanbanView({
       <div className="kanban-board-header">
         <div className="kanban-board-title-row">
           <div className="kanban-board-title-block">
-            <span className="section-kicker">TASK BOARD</span>
-            <h2 className="kanban-h2">Kanban<span className="heading-period">.</span></h2>
+            <span className="section-kicker">TASKS</span>
+            <h2 className="kanban-h2">Board<span className="heading-period">.</span></h2>
           </div>
           <div className="kanban-header-stats-compact">
             <span className="khs-item khs-total">
@@ -626,7 +628,7 @@ export function KanbanView({
             </div>
             <div className="kanban-shortcuts-list">
               <div className="ks-row"><kbd>N</kbd><span>New task</span></div>
-              <div className="ks-row"><kbd>K</kbd><span>Scroll to Kanban</span></div>
+              <div className="ks-row"><kbd>K</kbd><span>Scroll to Board</span></div>
               <div className="ks-row"><kbd>?</kbd><span>Toggle shortcuts</span></div>
               <div className="ks-row"><kbd>Esc</kbd><span>Close / deselect all</span></div>
             </div>
@@ -781,26 +783,19 @@ export function KanbanView({
                       <div className="kanban-empty kanban-empty-v2">
                         {col.key === "open" && (
                           <>
-                            <span className="kanban-empty-icon">📋</span>
+                            <ClipboardText size={26} weight="duotone" className="kanban-empty-icon" aria-hidden="true" />
                             <p>Your to-do list is clear.</p>
-                            <button
-                              type="button"
-                              className="kanban-empty-add-btn"
-                              onClick={() => handleAddTask("open")}
-                            >
-                              <Plus size={12} weight="bold" /> Add a task
-                            </button>
                           </>
                         )}
                         {col.key === "in_progress" && (
                           <>
-                            <span className="kanban-empty-icon">⚡</span>
+                            <Lightning size={26} weight="duotone" className="kanban-empty-icon" aria-hidden="true" />
                             <p>Drag a task here when you start working on it.</p>
                           </>
                         )}
                         {col.key === "completed" && (
                           <>
-                            <span className="kanban-empty-icon">✅</span>
+                            <CheckCircle size={26} weight="duotone" className="kanban-empty-icon" aria-hidden="true" />
                             <p>
                               {dateFilter === "completed"
                                 ? "No completed tasks match your filters."

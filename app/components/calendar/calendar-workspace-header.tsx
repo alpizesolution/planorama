@@ -1,7 +1,8 @@
 "use client";
 
 import React from "react";
-import { CaretLeft, CaretRight, CalendarBlank } from "@phosphor-icons/react";
+import { CaretLeft, CaretRight } from "@phosphor-icons/react";
+import { DatePickerButton, type DatePickerMode } from "./date-picker-button";
 
 export interface CalendarWorkspaceHeaderProps {
   /** Section kicker label, e.g. "DAILY WORKSPACE", "WEEKLY WORKSPACE" */
@@ -29,6 +30,8 @@ export interface CalendarWorkspaceHeaderProps {
   datePickerValue?: string;
   onDatePickerChange?: (value: string) => void;
   datePickerAriaLabel?: string;
+  /** "day" (default) picks a date; "month" picks a month. Class contract: cal-ws-picker-wrap / cal-ws-picker-input */
+  datePickerMode?: DatePickerMode;
 
   /** Additional toolbar items or action buttons */
   extraControls?: React.ReactNode;
@@ -69,6 +72,7 @@ export function CalendarWorkspaceHeader({
   datePickerValue,
   onDatePickerChange,
   datePickerAriaLabel = "Jump to date",
+  datePickerMode = "day",
   extraControls,
   className = "",
   style,
@@ -141,22 +145,12 @@ export function CalendarWorkspaceHeader({
 
         {/* Compact Date Picker */}
         {onDatePickerChange && (
-          <div className="cal-ws-picker-wrap" title={datePickerAriaLabel}>
-            <input
-              type="date"
-              className="cal-ws-picker-input day-picker-input"
-              value={datePickerValue || ""}
-              onChange={(e) => {
-                if (e.target.value) {
-                  onDatePickerChange(e.target.value);
-                }
-              }}
-              aria-label={datePickerAriaLabel}
-            />
-            <span className="cal-ws-picker-icon day-picker-icon" aria-hidden="true">
-              <CalendarBlank size={14} weight="bold" />
-            </span>
-          </div>
+          <DatePickerButton
+            value={datePickerValue || ""}
+            onChange={onDatePickerChange}
+            ariaLabel={datePickerAriaLabel}
+            mode={datePickerMode}
+          />
         )}
 
         {extraControls}

@@ -720,7 +720,7 @@ export function UnifiedCreateModal({
                     value={eventCalendarId}
                     onChange={(e) => setEventCalendarId(e.target.value)}
                   >
-                    <option value="none">📅 Planorama (Local Calendar)</option>
+                    <option value="none">Planorama (Local Calendar)</option>
                     {writableCalendars.map((cal) => (
                       <option key={cal.id} value={cal.id}>
                         {cal.name} {cal.accountEmail ? `(${cal.accountEmail})` : ""}
@@ -736,8 +736,8 @@ export function UnifiedCreateModal({
                     value={eventIsBusy ? "busy" : "free"}
                     onChange={(e) => setEventIsBusy(e.target.value === "busy")}
                   >
-                    <option value="busy">🔴 Busy (Blocks availability)</option>
-                    <option value="free">🟢 Free (Available during this time)</option>
+                    <option value="busy">Busy (blocks availability)</option>
+                    <option value="free">Free (available during this time)</option>
                   </select>
                 </label>
               </div>
@@ -917,10 +917,10 @@ export function UnifiedCreateModal({
                     onChange={(e) => setTaskPriority(e.target.value as PlannerTask["priority"])}
                   >
                     <option value="none">No Priority</option>
-                    <option value="p4">🟢 Low (P4)</option>
-                    <option value="p3">🔵 Medium (P3)</option>
-                    <option value="p2">🟠 High (P2)</option>
-                    <option value="p1">🔴 Urgent (P1)</option>
+                    <option value="p4">Low (P4)</option>
+                    <option value="p3">Medium (P3)</option>
+                    <option value="p2">High (P2)</option>
+                    <option value="p1">Urgent (P1)</option>
                   </select>
                 </label>
 
@@ -1025,7 +1025,7 @@ export function UnifiedCreateModal({
                     checked={taskIsPinned}
                     onChange={(e) => setTaskIsPinned(e.target.checked)}
                   />
-                  <span>📌 Pin to top</span>
+                  <span>Pin to top</span>
                 </label>
 
                 <label className="toggle-chip">
@@ -1034,7 +1034,7 @@ export function UnifiedCreateModal({
                     checked={taskIsPersonal}
                     onChange={(e) => setTaskIsPersonal(e.target.checked)}
                   />
-                  <span>🌿 Personal task</span>
+                  <span>Personal task</span>
                 </label>
               </div>
 
@@ -1063,7 +1063,7 @@ export function UnifiedCreateModal({
                     <option value="none">Planorama (Local Only)</option>
                     {writableCalendars.map((cal) => (
                       <option key={cal.id} value={cal.id}>
-                        📅 {cal.name}
+                        {cal.name}
                       </option>
                     ))}
                   </select>
@@ -1187,10 +1187,10 @@ export function UnifiedCreateModal({
                     value={apptMethod}
                     onChange={(e) => setApptMethod(e.target.value as MeetingMethod)}
                   >
-                    <option value="google_meet">📹 Google Meet video call</option>
-                    <option value="in_person">🏢 In-person meeting</option>
-                    <option value="phone">📞 Phone call</option>
-                    <option value="custom">🌐 Custom link / address</option>
+                    <option value="google_meet">Google Meet video call</option>
+                    <option value="in_person">In-person meeting</option>
+                    <option value="phone">Phone call</option>
+                    <option value="custom">Custom link / address</option>
                   </select>
                 </label>
 
@@ -1221,7 +1221,7 @@ export function UnifiedCreateModal({
                   <option value="none">Planorama (Local Tasks & Events)</option>
                   {writableCalendars.map((cal) => (
                     <option key={cal.id} value={cal.id}>
-                      📅 {cal.name}
+                      {cal.name}
                     </option>
                   ))}
                 </select>
