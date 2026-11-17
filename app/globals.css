@@ -11384,6 +11384,19 @@ html, body {
   background: #ea4335;
   box-shadow: 0 0 4px rgba(234, 67, 53, 0.7);
 }
+.week-current-time-label {
+  position: absolute;
+  left: 4px;
+  top: -17px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  background: #ea4335;
+  color: #fff;
+  font-size: 8px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
 
 /* Positioned Event Cards in Weekly Timeline */
 .week-timeline-event {

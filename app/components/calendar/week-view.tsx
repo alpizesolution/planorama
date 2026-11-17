@@ -744,6 +744,9 @@ export function WeekView({
                             title={`Current time: ${new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`}
                           >
                             <span className="current-time-dot" />
+                            <span className="week-current-time-label">
+                              {new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+                            </span>
                           </div>
                         )}
 
