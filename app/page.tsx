@@ -22,6 +22,7 @@ import {
   CalendarClock as CalendarClockIcon,
 } from "lucide-react";
 import { createTask, getTasks, removeTask, updateTask } from "@/lib/schedule/task-service";
+import { nextOccurrenceTask } from "@/lib/schedule/recurrence";
 import type { PlannerTask, PlannerPreferences } from "@/lib/schedule/types";
 import { validateTask } from "@/lib/schedule/validation";
 import { getWeekDays, getWorkWeekDays, toDateKey, monthGridDays, daysInMonth } from "@/lib/calendar/date-utils";
@@ -677,18 +678,6 @@ export default function HomePage() {
   });
 
   const isOverdue = (task: PlannerTask) => isTaskItem(task) && task.status !== "completed" && Boolean(task.dueDate && task.dueDate < todayKey);
-  const nextOccurrenceDate = (dateKey: string, recurrence: PlannerTask["recurrence"]) => {
-    const [year, month, day] = dateKey.split("-").map(Number);
-    const date = new Date(Date.UTC(year, month - 1, day));
-    if (recurrence === "daily") date.setUTCDate(date.getUTCDate() + 1);
-    if (recurrence === "weekly") date.setUTCDate(date.getUTCDate() + 7);
-    if (recurrence === "monthly") {
-      const nextMonth = date.getUTCMonth() + 1;
-      const lastDay = new Date(Date.UTC(date.getUTCFullYear(), nextMonth + 1, 0)).getUTCDate();
-      date.setUTCMonth(nextMonth, Math.min(day, lastDay));
-    }
-    return date.toISOString().slice(0, 10);
-  };
 
   const showToast = useCallback((message: string) => {
     setToast(message);
@@ -1726,24 +1715,12 @@ export default function HomePage() {
     setTasks((current) => current.map((item) => item.id === task.id ? updated : item));
     try {
       await updateTask(updated);
-      if (updated.status === "completed" && task.status !== "completed" && updated.recurrence !== "none" && updated.dueDate) {
-        const nextDueDate = nextOccurrenceDate(updated.dueDate, updated.recurrence);
-        const alreadyExists = tasks.some((item) => item.id !== updated.id && item.title === updated.title && item.dueDate === nextDueDate && item.recurrence === updated.recurrence);
-        if (!alreadyExists) {
-          const nextTask = await createTask({
-            title: updated.title,
-            notes: updated.notes,
-            priority: updated.priority,
-            isPinned: updated.isPinned,
-            isPersonal: updated.isPersonal,
-            timingPreference: updated.timingPreference,
-            dueDate: nextDueDate,
-            recurrence: updated.recurrence,
-            projectId: updated.projectId,
-            labelIds: updated.labelIds,
-            dueTime: updated.dueTime,
-          });
-          setTasks((current) => [...current, nextTask]);
+      if (updated.status === "completed" && task.status !== "completed") {
+        const nextTask = nextOccurrenceTask(updated);
+        const alreadyExists = nextTask && tasks.some((item) => item.id === nextTask.id || (item.seriesId === nextTask.seriesId && item.occurrenceDate === nextTask.occurrenceDate));
+        if (nextTask && !alreadyExists) {
+          const created = await createTask(nextTask);
+          setTasks((current) => [...current, created]);
         }
       }
       setSaveError("");
