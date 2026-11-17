@@ -109,6 +109,16 @@ export function WeekView({
   const isWorkWeek = weekDays.length === 5 || currentView === "workWeek";
 
   const weekDateKeys = useMemo(() => new Set(weekDays.map(toDateKey)), [weekDays]);
+  const dailyTaskProgress = useMemo(() => {
+    const progress = new Map<string, { completed: number; total: number; percent: number }>();
+    for (const dateKey of weekDateKeys) {
+      const dayTasks = tasks.filter((task) => task.dueDate === dateKey && isTaskItem(task));
+      const completed = dayTasks.filter((task) => task.status === "completed").length;
+      const total = dayTasks.length;
+      progress.set(dateKey, { completed, total, percent: total > 0 ? Math.round((completed / total) * 100) : 0 });
+    }
+    return progress;
+  }, [tasks, weekDateKeys]);
   const hasTodayInWeek = useMemo(() => weekDateKeys.has(todayKey), [weekDateKeys, todayKey]);
 
   // Live minute of day for current-time indicator
@@ -515,6 +525,7 @@ export function WeekView({
                   const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
                   const dayShort = day.toLocaleDateString("en-US", { weekday: "short" });
                   const dayFull = day.toLocaleDateString("en-US", { weekday: "long" });
+                  const progress = dailyTaskProgress.get(dateKey) ?? { completed: 0, total: 0, percent: 0 };
 
                   return (
                     <div
@@ -538,6 +549,10 @@ export function WeekView({
                       <span className="week-header-name">{dayShort}</span>
                       <span className={`week-header-date-badge ${isToday ? "today-badge" : ""} ${isSelected ? "selected-badge" : ""}`}>
                         {day.getDate()}
+                      </span>
+                      <span className="week-header-progress" aria-label={`${progress.completed} of ${progress.total} tasks completed`}>
+                        <span className="week-header-progress-track"><span style={{ width: `${progress.percent}%` }} /></span>
+                        <span className="week-header-progress-label">{progress.total > 0 ? `${progress.percent}%` : "0%"}</span>
                       </span>
                     </div>
                   );

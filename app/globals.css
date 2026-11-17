@@ -11088,6 +11088,10 @@ html, body {
   outline: 2px solid var(--ink, #1e1e24);
   outline-offset: -2px;
 }
+.week-header-progress { display: flex; flex-direction: column; align-items: center; gap: 2px; width: min(72px, 90%); margin-top: 1px; }
+.week-header-progress-track { display: block; width: 100%; height: 4px; overflow: hidden; border-radius: 999px; background: #dedbd4; }
+.week-header-progress-track > span { display: block; height: 100%; border-radius: inherit; background: #159a72; transition: width .2s ease; }
+.week-header-progress-label { color: #6f6a61; font-size: 8px; font-weight: 700; line-height: 1; }
 
 .week-header-name {
   font-size: 11px;
