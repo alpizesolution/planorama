@@ -161,6 +161,7 @@ export function DayView({
   // Auto-scroll timeline to a useful time range on mount or day change
   const timelineScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const timelineGridRef = useRef<HTMLDivElement | null>(null);
+  const hasMountedTimelineRef = useRef(false);
 
   const handleTimelineDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -177,6 +178,16 @@ export function DayView({
 
   useEffect(() => {
     if (!timelineScrollContainerRef.current) return;
+
+    // Keep the first render at the top of the timeline so the All Day boundary,
+    // midnight row, and 12 AM label are visible together. Auto-navigation can
+    // still jump to a useful time after the initial layout has been displayed.
+    if (!hasMountedTimelineRef.current) {
+      hasMountedTimelineRef.current = true;
+      timelineScrollContainerRef.current.scrollTop = 0;
+      return;
+    }
+
     let targetMinutes = 8 * 60; // default 8:00 AM
 
     if (isToday) {
