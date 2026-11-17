@@ -387,7 +387,11 @@ export function DayView({
               const period = hour >= 12 ? "PM" : "AM";
               const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
               return (
-                <div key={hour} className="time-axis-cell" style={{ height: `${HOUR_HEIGHT}px` }}>
+                <div
+                  key={hour}
+                  className={`time-axis-cell${hour === 0 ? " time-axis-cell-midnight" : ""}`}
+                  style={{ height: `${HOUR_HEIGHT}px` }}
+                >
                   <span className="time-axis-label">
                     {displayHour} {period}
                   </span>

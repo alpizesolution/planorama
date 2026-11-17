@@ -8831,10 +8831,12 @@ html, body {
 
 /* The first grid line is the top edge of the scroll viewport. Keep its label
    inside the row; later labels use the negative transform to sit on their line. */
-.day-time-axis .time-axis-cell:first-child {
+.day-time-axis .time-axis-cell-midnight {
+  position: relative;
+  z-index: 1;
   padding-top: 8px;
 }
-.day-time-axis .time-axis-cell:first-child .time-axis-label {
+.day-time-axis .time-axis-cell-midnight .time-axis-label {
   transform: none;
 }
 
@@ -15552,11 +15554,13 @@ html, body {
     transform: translateY(-7px) !important;
   }
 
-  .day-time-axis .time-axis-cell:first-child {
+  .day-time-axis .time-axis-cell-midnight {
+    position: relative !important;
+    z-index: 1 !important;
     padding-top: 6px !important;
   }
 
-  .day-time-axis .time-axis-cell:first-child .time-axis-label {
+  .day-time-axis .time-axis-cell-midnight .time-axis-label {
     transform: none !important;
   }
 
