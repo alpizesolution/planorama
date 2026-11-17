@@ -1,6 +1,6 @@
 import type { PlannerTask } from "../schedule/types";
 import type { Habit, HabitCheckIn } from "../habits/types";
-import { isHabitScheduledForDate } from "../habits/streak-utils";
+import { isHabitScheduledForDate, formatLocalDateKey } from "../habits/streak-utils";
 import { toDateKey } from "../calendar/date-utils";
 import { isTaskItem, isHolidayItem } from "../calendar/item-classifier";
 
@@ -41,6 +41,42 @@ export function calculateDailyOverview(
     overdueCount,
     progressPercent,
   };
+}
+
+/**
+ * Counts consecutive days (ending today) where the user completed ≥1 task or had ≥1 habit check-in.
+ * Today counts as a streak day even if not yet complete (still in-progress).
+ */
+export function calculateCurrentStreak(
+  tasks: PlannerTask[],
+  checkIns: HabitCheckIn[],
+  todayKey: string
+): number {
+  const activityDates = new Set<string>();
+  for (const t of tasks) {
+    if (t.status === "completed" && t.dueDate) activityDates.add(t.dueDate);
+  }
+  for (const c of checkIns) {
+    if (c.completed) activityDates.add(c.date);
+  }
+
+  const [y, m, d] = todayKey.split("-").map(Number);
+  const base = new Date(y, m - 1, d);
+  let streak = 0;
+
+  for (let i = 0; i <= 365; i++) {
+    const date = new Date(base);
+    date.setDate(base.getDate() - i);
+    const key = formatLocalDateKey(date);
+    if (activityDates.has(key)) {
+      streak++;
+    } else if (i > 0) {
+      // Gap breaks streak; today (i=0) is still in-progress so don't break on it
+      break;
+    }
+  }
+
+  return streak;
 }
 
 export const PRIORITY_WEIGHTS: Record<PlannerTask["priority"], number> = {

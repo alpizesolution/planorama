@@ -32,6 +32,7 @@ interface UpcomingWidgetProps {
   onEditTask: (task: PlannerTask) => void;
   onQuickAdd: (dateKey: string) => void;
   onViewCalendar: () => void;
+  onRescheduleToToday?: (taskId: string) => void;
   priorityLabel: (p: PlannerTask["priority"]) => string;
   priorityEmoji: (p: PlannerTask["priority"]) => string;
 }
@@ -47,6 +48,7 @@ export function UpcomingWidget({
   onEditTask,
   onQuickAdd,
   onViewCalendar,
+  onRescheduleToToday,
   priorityLabel,
   priorityEmoji,
 }: UpcomingWidgetProps) {
@@ -167,9 +169,25 @@ export function UpcomingWidget({
                         </div>
                       )}
                     </div>
-                    <span className={`priority-badge-sm priority-${task.priority}`}>
-                      {priorityEmoji(task.priority)} {priorityLabel(task.priority)}
-                    </span>
+                    <div className="upcoming-overdue-actions">
+                      <span className={`priority-badge-sm priority-${task.priority}`}>
+                        {priorityEmoji(task.priority)} {priorityLabel(task.priority)}
+                      </span>
+                      {onRescheduleToToday && task.status !== "completed" && (
+                        <button
+                          type="button"
+                          className="upcoming-reschedule-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRescheduleToToday(task.id);
+                          }}
+                          title="Reschedule to Today"
+                        >
+                          <ArrowRight size={11} weight="bold" />
+                          <span>Today</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               })}

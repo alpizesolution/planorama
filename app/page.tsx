@@ -1734,6 +1734,20 @@ export default function HomePage() {
     }
   }
 
+  async function rescheduleTaskToToday(taskId: string) {
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task) return;
+    const updated = { ...task, dueDate: todayKey };
+    setTasks((current) => current.map((item) => item.id === taskId ? updated : item));
+    try {
+      await updateTask(updated);
+      setSaveError("");
+    } catch {
+      setTasks((current) => current.map((item) => item.id === taskId ? task : item));
+      setSaveError("Could not reschedule task.");
+    }
+  }
+
   async function moveTaskToStatus(taskId: string, newStatus: PlannerTask["status"]) {
     const task = tasks.find((t) => t.id === taskId);
     if (!task || task.status === newStatus) return;
@@ -2687,6 +2701,7 @@ export default function HomePage() {
                 onToggleTask={(task) => void toggleTask(task)}
                 onEditTask={(task) => openTaskDetail(task)}
                 onDeleteTask={(task) => void deleteTask(task)}
+                onRescheduleToToday={(taskId) => void rescheduleTaskToToday(taskId)}
                 onViewCalendar={() => {
                   setView("month");
                   syncViewUrl("month");

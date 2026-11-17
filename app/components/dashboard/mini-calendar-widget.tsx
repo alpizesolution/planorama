@@ -64,6 +64,12 @@ export function MiniCalendarWidget({
     return map;
   }, [tasks]);
 
+  const getDotColor = (dateKey: string): string => {
+    if (dateKey < todayKey) return "var(--color-overdue-dot, #ef4444)";
+    if (dateKey === todayKey) return "var(--color-today-dot, #f59e0b)";
+    return resolvedTheme.taskDotColor;
+  };
+
   return (
     <section className="dashboard-widget mini-calendar-card neo-card" aria-label="Mini Calendar">
       <div className="card-header dashboard-widget-header">
@@ -157,7 +163,7 @@ export function MiniCalendarWidget({
                 {taskCount > 0 && (
                   <span
                     className="mini-cal-task-dot"
-                    style={{ backgroundColor: resolvedTheme.taskDotColor }}
+                    style={{ backgroundColor: getDotColor(dateKey) }}
                   />
                 )}
               </button>

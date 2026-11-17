@@ -3,22 +3,30 @@
 import { useMemo } from "react";
 import { Plus, CheckCircle, WarningCircle, Clock, CalendarBlank } from "@phosphor-icons/react";
 import type { PlannerTask } from "@/lib/schedule/types";
-import { calculateDailyOverview } from "@/lib/dashboard/dashboard-utils";
+import type { HabitCheckIn } from "@/lib/habits/types";
+import { calculateDailyOverview, calculateCurrentStreak } from "@/lib/dashboard/dashboard-utils";
 
 interface DailyOverviewWidgetProps {
   tasks: PlannerTask[];
   todayKey: string;
   onQuickAdd: (dateKey: string) => void;
+  checkIns?: HabitCheckIn[];
 }
 
 export function DailyOverviewWidget({
   tasks,
   todayKey,
   onQuickAdd,
+  checkIns = [],
 }: DailyOverviewWidgetProps) {
   const stats = useMemo(
     () => calculateDailyOverview(tasks, todayKey),
     [tasks, todayKey]
+  );
+
+  const currentStreak = useMemo(
+    () => calculateCurrentStreak(tasks, checkIns, todayKey),
+    [tasks, checkIns, todayKey]
   );
 
   const [y, m, d] = todayKey.split("-").map(Number);
@@ -52,7 +60,7 @@ export function DailyOverviewWidget({
         </button>
       </div>
 
-      {/* 4 Overview Stat Tiles */}
+      {/* 5 Overview Stat Tiles */}
       <div className="daily-stats-grid">
         <div className="daily-stat-tile stat-due-today">
           <div className="daily-stat-icon-wrap">
@@ -91,6 +99,16 @@ export function DailyOverviewWidget({
           <div className="daily-stat-info">
             <span className="daily-stat-val">{stats.remainingToday}</span>
             <span className="daily-stat-lbl">Remaining</span>
+          </div>
+        </div>
+
+        <div className={`daily-stat-tile stat-streak ${currentStreak > 0 ? "has-streak" : ""}`}>
+          <div className="daily-stat-icon-wrap">
+            <span className="daily-stat-streak-emoji">🔥</span>
+          </div>
+          <div className="daily-stat-info">
+            <span className="daily-stat-val">{currentStreak}</span>
+            <span className="daily-stat-lbl">Day Streak</span>
           </div>
         </div>
       </div>
