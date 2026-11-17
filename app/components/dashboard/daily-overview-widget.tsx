@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { Plus, CheckCircle, WarningCircle, Clock, CalendarBlank } from "@phosphor-icons/react";
+import { Plus, CheckCircle, WarningCircle, Clock, CalendarBlank, Hourglass } from "@phosphor-icons/react";
 import type { PlannerTask } from "@/lib/schedule/types";
 import { calculateDailyOverview } from "@/lib/dashboard/dashboard-utils";
 
@@ -29,13 +29,12 @@ export function DailyOverviewWidget({
     day: "numeric",
     year: "numeric",
   });
-  const weekdayDisplay = todayDate.toLocaleDateString("en", { weekday: "long" });
 
   return (
     <section className="dashboard-widget daily-overview-card neo-card" aria-label="Daily Overview">
       <div className="daily-overview-top">
         <div className="daily-overview-greeting">
-          <span className="section-kicker">PERSONAL COMMAND CENTER · {weekdayDisplay.toUpperCase()}</span>
+          <span className="section-kicker">TODAY AT A GLANCE</span>
           <h2 className="daily-overview-date">
             <CalendarBlank size={26} weight="fill" className="daily-overview-cal-icon" />
             <span>{fullDateDisplay}</span>
@@ -86,7 +85,7 @@ export function DailyOverviewWidget({
 
         <div className="daily-stat-tile stat-progress-rate">
           <div className="daily-stat-icon-wrap">
-            <span className="daily-stat-percent-badge">{stats.progressPercent}%</span>
+            <Hourglass size={20} weight="bold" />
           </div>
           <div className="daily-stat-info">
             <span className="daily-stat-val">{stats.remainingToday}</span>

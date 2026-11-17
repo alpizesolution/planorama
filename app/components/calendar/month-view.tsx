@@ -206,6 +206,7 @@ export function MonthView({
           onSelectDate(dateStr);
         }}
         datePickerAriaLabel="Jump to month"
+        datePickerMode="month"
       />
 
       {/* 2. Weekday Header Row */}

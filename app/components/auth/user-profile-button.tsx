@@ -123,13 +123,13 @@ export function UserProfileButton({
             gap: "7px",
             padding: "4px 10px 4px 5px",
             background: "#fffdfa",
-            border: "2px solid #1c1917",
+            border: "2px solid var(--ink)",
             borderRadius: "999px",
-            boxShadow: "2px 2px 0px #1c1917",
+            boxShadow: "2px 2px 0px var(--ink)",
             cursor: "pointer",
             fontWeight: 600,
             fontSize: "12.5px",
-            color: "#1c1917",
+            color: "var(--ink)",
             transition: "all 0.15s ease",
           }}
         >
@@ -142,7 +142,7 @@ export function UserProfileButton({
                 width: "24px",
                 height: "24px",
                 borderRadius: "50%",
-                border: "1.5px solid #1c1917",
+                border: "1.5px solid var(--ink)",
                 objectFit: "cover",
               }}
             />
@@ -153,7 +153,7 @@ export function UserProfileButton({
                 height: "24px",
                 borderRadius: "50%",
                 background: "#ffd84d",
-                border: "1.5px solid #1c1917",
+                border: "1.5px solid var(--ink)",
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -181,9 +181,9 @@ export function UserProfileButton({
               right: 0,
               width: "280px",
               background: "#fffdfa",
-              border: "2px solid #1c1917",
+              border: "2px solid var(--ink)",
               borderRadius: "14px",
-              boxShadow: "4px 4px 0px #1c1917",
+              boxShadow: "4px 4px 0px var(--ink)",
               padding: "16px",
               zIndex: 1050,
             }}
@@ -199,7 +199,7 @@ export function UserProfileButton({
                     width: "44px",
                     height: "44px",
                     borderRadius: "50%",
-                    border: "2px solid #1c1917",
+                    border: "2px solid var(--ink)",
                     objectFit: "cover",
                   }}
                 />
@@ -210,7 +210,7 @@ export function UserProfileButton({
                     height: "44px",
                     borderRadius: "50%",
                     background: "#ffd84d",
-                    border: "2px solid #1c1917",
+                    border: "2px solid var(--ink)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
@@ -222,7 +222,7 @@ export function UserProfileButton({
                 </div>
               )}
               <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontWeight: 700, fontSize: "14px", color: "#1c1917", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <div style={{ fontWeight: 700, fontSize: "14px", color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {user.displayName || "Planorama User"}
                 </div>
                 <div style={{ fontSize: "11.5px", color: "#78716c", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -249,11 +249,11 @@ export function UserProfileButton({
                     gap: "10px",
                     padding: "8px 10px",
                     background: "#fcf8f2",
-                    border: "1.5px solid #1c1917",
+                    border: "1.5px solid var(--ink)",
                     borderRadius: "8px",
                     fontSize: "12.5px",
                     fontWeight: 600,
-                    color: "#1c1917",
+                    color: "var(--ink)",
                     cursor: "pointer",
                     textAlign: "left",
                   }}
@@ -335,33 +335,14 @@ export function UserProfileButton({
           onClick={handleSignInClick}
           disabled={loading || isSigningIn}
           title="Sign in with your Gmail account"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "8px",
-            padding: "6px 12px",
-            background: "#fffdfa",
-            border: "2px solid #1c1917",
-            borderRadius: "999px",
-            boxShadow: "2px 2px 0px #1c1917",
-            cursor: "pointer",
-            fontWeight: 700,
-            fontSize: "12.5px",
-            color: "#1c1917",
-            transition: "all 0.15s ease",
-          }}
-          onMouseDown={(e) => {
-            e.currentTarget.style.transform = "translate(1px, 1px)";
-            e.currentTarget.style.boxShadow = "1px 1px 0px #1c1917";
-          }}
-          onMouseUp={(e) => {
-            e.currentTarget.style.transform = "none";
-            e.currentTarget.style.boxShadow = "2px 2px 0px #1c1917";
-          }}
+          aria-label={isSigningIn ? "Signing in" : "Sign in with Google"}
         >
           <GoogleGIcon />
           <span className="sign-in-btn-label">
             {isSigningIn ? "Signing in…" : "Sign in with Google"}
+          </span>
+          <span className="sign-in-btn-label-short" aria-hidden="true">
+            {isSigningIn ? "…" : "Sign in"}
           </span>
         </button>
       </div>
@@ -387,9 +368,9 @@ export function UserProfileButton({
             className="firebase-modal-content neo-card"
             style={{
               background: "#fffdfa",
-              border: "3px solid #1c1917",
+              border: "3px solid var(--ink)",
               borderRadius: "18px",
-              boxShadow: "6px 6px 0px #1c1917",
+              boxShadow: "6px 6px 0px var(--ink)",
               maxWidth: "520px",
               width: "100%",
               padding: "24px",
@@ -406,7 +387,7 @@ export function UserProfileButton({
                 top: "16px",
                 right: "16px",
                 background: "#f5efe6",
-                border: "2px solid #1c1917",
+                border: "2px solid var(--ink)",
                 borderRadius: "50%",
                 width: "32px",
                 height: "32px",
@@ -427,7 +408,7 @@ export function UserProfileButton({
                   height: "38px",
                   borderRadius: "10px",
                   background: "#ffeed4",
-                  border: "2px solid #1c1917",
+                  border: "2px solid var(--ink)",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -436,7 +417,7 @@ export function UserProfileButton({
                 <Question size={22} weight="bold" color="#ea580c" />
               </div>
               <div>
-                <h3 style={{ margin: 0, fontSize: "17px", fontWeight: 800, color: "#1c1917" }}>
+                <h3 style={{ margin: 0, fontSize: "17px", fontWeight: 800, color: "var(--ink)" }}>
                   Connect Firebase Project
                 </h3>
                 <span style={{ fontSize: "12px", color: "#78716c" }}>
@@ -512,11 +493,11 @@ export function UserProfileButton({
                 style={{
                   padding: "8px 16px",
                   background: "#ffd84d",
-                  border: "2px solid #1c1917",
+                  border: "2px solid var(--ink)",
                   borderRadius: "8px",
                   fontWeight: 700,
                   fontSize: "12.5px",
-                  boxShadow: "2px 2px 0px #1c1917",
+                  boxShadow: "2px 2px 0px var(--ink)",
                   cursor: "pointer",
                 }}
               >

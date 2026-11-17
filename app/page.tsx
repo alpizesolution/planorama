@@ -60,6 +60,7 @@ import {
 } from "@/lib/holidays/service";
 import type { LocalHolidayPreferences } from "@/lib/holidays/types";
 import { UserProfileButton } from "@/app/components/auth/user-profile-button";
+import { HeaderViewNav } from "@/app/components/header-view-nav";
 import {
   executeTwoWaySync,
   fetchGoogleIntegrationStatus,
@@ -100,7 +101,6 @@ import {
 import {
   type AppView,
   DEFAULT_VIEW,
-  NAV_VIEWS,
   resolveViewFromUrl,
   buildViewRelativeUrl,
 } from "@/lib/calendar/view-routing";
@@ -456,17 +456,6 @@ export default function HomePage() {
     setAddTaskOpen(false);
   }, []);
 
-  // Active view button ref for smooth scroll on mobile navigation
-  const activeViewRef = useRef<HTMLButtonElement | null>(null);
-  useEffect(() => {
-    if (activeViewRef.current) {
-      activeViewRef.current.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest",
-        inline: "nearest",
-      });
-    }
-  }, [view]);
 
   // Task detail modal state
   const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
@@ -2518,29 +2507,14 @@ export default function HomePage() {
           </span>
         </div>
 
-        {/* Segmented view navigation strip placed beside heading on desktop */}
-        <div className="view-switcher-container">
-          <nav className="view-switcher" role="tablist" aria-label="Views">
-            {NAV_VIEWS.map((v) => {
-              const isActive = view === v.id;
-              return (
-                <button
-                  key={v.id}
-                  ref={isActive ? activeViewRef : null}
-                  role="tab"
-                  aria-selected={isActive}
-                  className={isActive ? "vs-active" : ""}
-                  onClick={() => {
-                    setView(v.id);
-                    syncViewUrl(v.id);
-                  }}
-                >
-                  {v.label}
-                </button>
-              );
-            })}
-          </nav>
-        </div>
+        {/* View navigation: full strip on wide screens, grouped "Calendar" menu on laptops */}
+        <HeaderViewNav
+          view={view}
+          onSelect={(v) => {
+            setView(v);
+            syncViewUrl(v);
+          }}
+        />
 
         <div className="topbar-actions">
           <button
@@ -3202,10 +3176,10 @@ export default function HomePage() {
           syncViewUrl("kanban");
           setIsMoreMenuOpen(false);
         }}
-        aria-label="Tasks Board"
+        aria-label="Board"
       >
         <KanbanIcon size={20} strokeWidth={view === "kanban" ? 2.5 : 2} />
-        <span>Tasks</span>
+        <span>Board</span>
       </button>
 
       <button

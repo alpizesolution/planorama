@@ -142,14 +142,6 @@ export function DashboardView({
     return resolvedWidgets.filter((w) => w.visible);
   }, [resolvedWidgets]);
 
-  const [y, m, d] = todayKey.split("-").map(Number);
-  const todayDate = new Date(y, m - 1, d);
-  const formattedToday = todayDate.toLocaleDateString("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  });
-
   // Clear selection on background click
   useEffect(() => {
     function handleDocumentClick(e: MouseEvent) {
@@ -585,10 +577,6 @@ export function DashboardView({
           <span className="dashboard-kicker">COMMAND CENTER</span>
           <div className="dashboard-title-row">
             <h1 className="dashboard-title">Dashboard</h1>
-            <span className="dashboard-header-date-badge" title="Today's date">
-              <span className="dashboard-date-dot" aria-hidden="true" />
-              {formattedToday}
-            </span>
           </div>
         </div>
 

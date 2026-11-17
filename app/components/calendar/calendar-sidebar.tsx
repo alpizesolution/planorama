@@ -776,7 +776,7 @@ export function CalendarSidebar({
               title="Connect personal Google account or add a client calendar"
             >
               <Plus size={14} weight="bold" />
-              <span>{googleStatus?.connected ? "+ Add Client Account" : "+ Connect Google Calendar"}</span>
+              <span>{googleStatus?.connected ? "Add Client Account" : "Connect Google Calendar"}</span>
             </button>
           </div>
         </div>
