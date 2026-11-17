@@ -35,6 +35,7 @@ export interface DailySummaryCounts {
   remaining: number;
   overdue: number;
   skipped: number;
+  canceled: number;
 }
 
 export interface DailyProgress {
@@ -59,6 +60,14 @@ function count(completed: number, total: number): ProgressCount {
 
 export function isCancelledItem(item: Partial<PlannerTask>): boolean {
   return item.eventStatus === "cancelled" || item.isCanceled === true || item.isSkipped === true;
+}
+
+export function isSkippedItem(item: Partial<PlannerTask>): boolean {
+  return item.isSkipped === true;
+}
+
+export function isCanceledItem(item: Partial<PlannerTask>): boolean {
+  return item.eventStatus === "cancelled" || item.isCanceled === true;
 }
 
 export function getDayItemKind(item: PlannerTask): DayItemKind {
@@ -121,7 +130,13 @@ function preferItem(a: PlannerTask, b: PlannerTask): PlannerTask {
   const bTask = isTaskItem(b);
   const base = aTask === bTask ? a : aTask ? a : b;
   const completed = a.status === "completed" || b.status === "completed";
-  return completed && base.status !== "completed" ? { ...base, status: "completed" } : base;
+  const merged = completed && base.status !== "completed" ? { ...base, status: "completed" as const } : base;
+  return {
+    ...merged,
+    isSkipped: Boolean(a.isSkipped || b.isSkipped),
+    isCanceled: Boolean(a.isCanceled || b.isCanceled),
+    eventStatus: a.eventStatus === "cancelled" || b.eventStatus === "cancelled" ? "cancelled" : merged.eventStatus,
+  };
 }
 
 /**
@@ -188,13 +203,15 @@ export function computeDailyProgress(input: {
   let remaining = 0;
   let overdue = 0;
   let skipped = 0;
+  let canceled = 0;
 
   for (const item of items) {
     const kind = getDayItemKind(item);
     const state = getDayItemState(item, dateKey, now);
 
     if (state === "cancelled") {
-      skipped++;
+      if (isSkippedItem(item)) skipped++;
+      else canceled++;
       continue;
     }
 
@@ -233,6 +250,6 @@ export function computeDailyProgress(input: {
     activities: count(actDone, actTotal),
     habits: count(habitDone, habitTotal),
     overall: { ...count(completed, total), remaining: total - completed },
-    summary: { completed, remaining, overdue, skipped },
+    summary: { completed, remaining, overdue, skipped, canceled },
   };
 }

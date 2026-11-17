@@ -6,6 +6,7 @@ import {
   Hourglass,
   WarningCircle,
   SkipForward,
+  Prohibit,
   CaretDown,
 } from "@phosphor-icons/react";
 import type { DailyProgress } from "@/lib/calendar/daily-progress";
@@ -124,6 +125,11 @@ export function DailyProgressPanel({ progress }: DailyProgressPanelProps) {
                 <SkipForward size={13} weight="fill" aria-hidden="true" />
                 <span className="dp-chip-value">{summary.skipped}</span>
                 <span className="dp-chip-label">Skipped</span>
+              </li>
+              <li className="dp-chip dp-chip-skipped">
+                <Prohibit size={13} weight="fill" aria-hidden="true" />
+                <span className="dp-chip-value">{summary.canceled}</span>
+                <span className="dp-chip-label">Canceled</span>
               </li>
             </ul>
           </div>

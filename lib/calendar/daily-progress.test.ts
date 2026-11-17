@@ -68,7 +68,7 @@ describe("Daily progress calculations", () => {
       now: noon,
     });
     expect(p.tasks).toEqual({ completed: 1, total: 3, percent: 33 });
-    expect(p.summary).toEqual({ completed: 1, remaining: 1, overdue: 1, skipped: 0 });
+    expect(p.summary).toEqual({ completed: 1, remaining: 1, overdue: 1, skipped: 0, canceled: 0 });
     expect(p.overall.remaining).toBe(2);
   });
 
@@ -84,7 +84,8 @@ describe("Daily progress calculations", () => {
       now: noon,
     });
     expect(p.activities).toEqual({ completed: 1, total: 3, percent: 33 });
-    expect(p.summary.skipped).toBe(1);
+    expect(p.summary.skipped).toBe(0);
+    expect(p.summary.canceled).toBe(1);
     expect(p.summary.completed).toBe(1);
     expect(p.summary.remaining).toBe(2);
   });
@@ -162,7 +163,43 @@ describe("Daily progress calculations", () => {
     expect(yesterday.relation).toBe("past");
     expect(yesterday.tasks).toEqual({ completed: 0, total: 1, percent: 0 });
     expect(yesterday.habits).toEqual({ completed: 1, total: 2, percent: 50 });
-    expect(yesterday.summary).toEqual({ completed: 1, remaining: 0, overdue: 1, skipped: 1 });
+    expect(yesterday.summary).toEqual({ completed: 1, remaining: 0, overdue: 1, skipped: 1, canceled: 0 });
+  });
+
+  it("excludes skipped, canceled, and deleted tasks from eligible progress", () => {
+    const p = computeDailyProgress({
+      tasks: [
+        task({ id: "done-1", status: "completed" }),
+        task({ id: "done-2", status: "completed" }),
+        task({ id: "done-3", status: "completed" }),
+        task({ id: "skipped-1", isSkipped: true }),
+        task({ id: "skipped-2", isSkipped: true }),
+        task({ id: "skipped-3", isSkipped: true }),
+      ],
+      dateKey: DAY,
+      now: noon,
+    });
+    expect(p.tasks).toEqual({ completed: 3, total: 3, percent: 100 });
+    expect(p.overall).toEqual({ completed: 3, total: 3, percent: 100, remaining: 0 });
+    expect(p.summary.skipped).toBe(3);
+
+    const deleted = computeDailyProgress({
+      tasks: [task({ id: "done-1", status: "completed" }), task({ id: "done-2", status: "completed" }), task({ id: "done-3", status: "completed" })],
+      dateKey: DAY,
+      now: noon,
+    });
+    expect(deleted.tasks.total).toBe(3);
+    expect(deleted.overall.percent).toBe(100);
+  });
+
+  it("excludes canceled tasks while reporting them separately", () => {
+    const p = computeDailyProgress({
+      tasks: [task({ id: "done-1", status: "completed" }), task({ id: "done-2", status: "completed" }), task({ id: "done-3", status: "completed" }), task({ id: "c1", isCanceled: true })],
+      dateKey: DAY,
+      now: noon,
+    });
+    expect(p.tasks).toEqual({ completed: 3, total: 3, percent: 100 });
+    expect(p.summary.canceled).toBe(1);
   });
 
   it("treats future dates as upcoming", () => {
@@ -174,7 +211,7 @@ describe("Daily progress calculations", () => {
       now: noon,
     });
     expect(p.relation).toBe("future");
-    expect(p.summary).toEqual({ completed: 0, remaining: 3, overdue: 0, skipped: 0 });
+    expect(p.summary).toEqual({ completed: 0, remaining: 3, overdue: 0, skipped: 0, canceled: 0 });
   });
 
   it("derives timeline states for timed items", () => {
