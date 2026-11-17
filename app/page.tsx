@@ -1402,6 +1402,8 @@ export default function HomePage() {
       googleAccountEmail: targetCalendar?.accountEmail,
       source: taskData.googleCalendarId ? "google" : "local",
       syncStatus: taskData.googleCalendarId ? "pending" : undefined,
+      recurrence: taskData.recurrence,
+      recurrenceConfig: taskData.recurrenceConfig,
       itemType: "task",
       color: preferences.itemColors?.taskColor,
     });
