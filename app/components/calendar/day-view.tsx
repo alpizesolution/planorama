@@ -58,6 +58,7 @@ export interface DayViewProps {
   onAddTask: (options?: { date?: string | null; time?: string | null; status?: PlannerTask["status"] }) => void;
   onOpenTaskDetail: (task: PlannerTask) => void;
   onToggleTask?: (task: PlannerTask) => Promise<void>;
+  onRescheduleTask?: (task: PlannerTask, dueDate: string, dueTime: string | null) => Promise<void>;
   onToggleMobileSidebar?: () => void;
   activeCalendarCount?: number;
   currentView?: DayAppView;
@@ -111,6 +112,7 @@ export function DayView({
   onAddTask,
   onOpenTaskDetail,
   onToggleTask,
+  onRescheduleTask,
   activeCalendarCount = 0,
   habits = [],
   habitCheckIns = [],
@@ -159,6 +161,19 @@ export function DayView({
   // Auto-scroll timeline to a useful time range on mount or day change
   const timelineScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const timelineGridRef = useRef<HTMLDivElement | null>(null);
+
+  const handleTimelineDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const taskId = e.dataTransfer.getData("text/plain");
+    const task = tasks.find((candidate) => candidate.id === taskId);
+    if (!task || !onRescheduleTask || !isTaskItem(task) || task.recurrence !== "none" || !timelineGridRef.current) return;
+    const rect = timelineGridRef.current.getBoundingClientRect();
+    const minutes = Math.max(0, Math.min(1439, Math.round(((e.clientY - rect.top) / HOUR_HEIGHT) * 60 / 15) * 15));
+    const hour = Math.floor(minutes / 60).toString().padStart(2, "0");
+    const minute = (minutes % 60).toString().padStart(2, "0");
+    void onRescheduleTask(task, currentDateKey, `${hour}:${minute}`);
+  };
 
   useEffect(() => {
     if (!timelineScrollContainerRef.current) return;
@@ -386,6 +401,8 @@ export function DayView({
             className="day-timeline-canvas"
             ref={timelineGridRef}
             onClick={handleTimelineClick}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={handleTimelineDrop}
             style={{ height: `${24 * HOUR_HEIGHT}px` }}
           >
             {/* Horizontal hour and half-hour separator lines */}
@@ -470,6 +487,8 @@ export function DayView({
                   }}
                   title={`${task.title} (${formatTimeRange(startMinutes, endMinutes)})${task.googleCalendarName ? ` · ${task.googleCalendarName}` : ""} · ${STATE_LABELS[itemState]}`}
                   aria-label={`${task.title}, ${formatTimeRange(startMinutes, endMinutes)}, ${STATE_LABELS[itemState]}`}
+                  draggable={Boolean(onRescheduleTask && isTaskItem(task) && task.recurrence === "none")}
+                  onDragStart={(e) => { e.dataTransfer.setData("text/plain", task.id); e.dataTransfer.effectAllowed = "move"; }}
                 >
                   <div className="timeline-event-header">
                     <div className="timeline-event-title-wrap">

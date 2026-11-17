@@ -22,6 +22,7 @@ import {
   CalendarClock as CalendarClockIcon,
 } from "lucide-react";
 import { createTask, getTasks, removeTask, updateTask } from "@/lib/schedule/task-service";
+import { nextOccurrenceTask } from "@/lib/schedule/recurrence";
 import type { PlannerTask, PlannerPreferences } from "@/lib/schedule/types";
 import { validateTask } from "@/lib/schedule/validation";
 import { getWeekDays, getWorkWeekDays, toDateKey, monthGridDays, daysInMonth } from "@/lib/calendar/date-utils";
@@ -677,18 +678,6 @@ export default function HomePage() {
   });
 
   const isOverdue = (task: PlannerTask) => isTaskItem(task) && task.status !== "completed" && Boolean(task.dueDate && task.dueDate < todayKey);
-  const nextOccurrenceDate = (dateKey: string, recurrence: PlannerTask["recurrence"]) => {
-    const [year, month, day] = dateKey.split("-").map(Number);
-    const date = new Date(Date.UTC(year, month - 1, day));
-    if (recurrence === "daily") date.setUTCDate(date.getUTCDate() + 1);
-    if (recurrence === "weekly") date.setUTCDate(date.getUTCDate() + 7);
-    if (recurrence === "monthly") {
-      const nextMonth = date.getUTCMonth() + 1;
-      const lastDay = new Date(Date.UTC(date.getUTCFullYear(), nextMonth + 1, 0)).getUTCDate();
-      date.setUTCMonth(nextMonth, Math.min(day, lastDay));
-    }
-    return date.toISOString().slice(0, 10);
-  };
 
   const showToast = useCallback((message: string) => {
     setToast(message);
@@ -1413,6 +1402,8 @@ export default function HomePage() {
       googleAccountEmail: targetCalendar?.accountEmail,
       source: taskData.googleCalendarId ? "google" : "local",
       syncStatus: taskData.googleCalendarId ? "pending" : undefined,
+      recurrence: taskData.recurrence,
+      recurrenceConfig: taskData.recurrenceConfig,
       itemType: "task",
       color: preferences.itemColors?.taskColor,
     });
@@ -1726,24 +1717,12 @@ export default function HomePage() {
     setTasks((current) => current.map((item) => item.id === task.id ? updated : item));
     try {
       await updateTask(updated);
-      if (updated.status === "completed" && task.status !== "completed" && updated.recurrence !== "none" && updated.dueDate) {
-        const nextDueDate = nextOccurrenceDate(updated.dueDate, updated.recurrence);
-        const alreadyExists = tasks.some((item) => item.id !== updated.id && item.title === updated.title && item.dueDate === nextDueDate && item.recurrence === updated.recurrence);
-        if (!alreadyExists) {
-          const nextTask = await createTask({
-            title: updated.title,
-            notes: updated.notes,
-            priority: updated.priority,
-            isPinned: updated.isPinned,
-            isPersonal: updated.isPersonal,
-            timingPreference: updated.timingPreference,
-            dueDate: nextDueDate,
-            recurrence: updated.recurrence,
-            projectId: updated.projectId,
-            labelIds: updated.labelIds,
-            dueTime: updated.dueTime,
-          });
-          setTasks((current) => [...current, nextTask]);
+      if (updated.status === "completed" && task.status !== "completed") {
+        const nextTask = nextOccurrenceTask(updated);
+        const alreadyExists = nextTask && tasks.some((item) => item.id === nextTask.id || (item.seriesId === nextTask.seriesId && item.occurrenceDate === nextTask.occurrenceDate));
+        if (nextTask && !alreadyExists) {
+          const created = await createTask(nextTask);
+          setTasks((current) => [...current, created]);
         }
       }
       setSaveError("");
@@ -1766,6 +1745,35 @@ export default function HomePage() {
     } catch {
       setTasks((current) => current.map((item) => item.id === taskId ? task : item));
       setSaveError("Could not update task status.");
+    }
+  }
+
+  async function rescheduleTask(task: PlannerTask, dueDate: string, dueTime: string | null) {
+    if (isLocalHolidayTask(task) || task.recurrence !== "none") {
+      showToast(task.recurrence !== "none" ? "Recurring tasks cannot be moved as individual occurrences yet." : "This item cannot be moved.");
+      return;
+    }
+    const previous = task;
+    const updated: PlannerTask = { ...task, dueDate, dueTime, syncStatus: task.googleEventId && !task.isReadOnlyCalendar ? "pending" : task.syncStatus };
+    setTasks((current) => current.map((item) => item.id === task.id ? updated : item));
+    try {
+      const saved = await updateTask(updated);
+      setTasks((current) => current.map((item) => item.id === task.id ? saved : item));
+      if (saved.googleEventId && !saved.isReadOnlyCalendar) {
+        enqueueSyncAction({
+          action: "update",
+          taskId: saved.id,
+          googleEventId: saved.googleEventId,
+          googleCalendarId: saved.googleCalendarId,
+          googleAccountId: saved.googleAccountId,
+          localUpdatedAt: new Date().toISOString(),
+        });
+        void handleSyncGoogle();
+      }
+      showToast("Task rescheduled.");
+    } catch {
+      setTasks((current) => current.map((item) => item.id === task.id ? previous : item));
+      setSaveError("Your task could not be rescheduled.");
     }
   }
 
@@ -2428,6 +2436,7 @@ export default function HomePage() {
       weeklyViewMode={weeklyViewMode}
       onSwitchWeeklyMode={(m) => setWeeklyViewMode(m)}
       onToggleTask={toggleTask}
+      onRescheduleTask={rescheduleTask}
       onMoveTaskStatus={moveTaskToStatus}
       labels={labels}
       saveError={saveError}
@@ -2784,6 +2793,7 @@ export default function HomePage() {
               }
               onOpenTaskDetail={openTaskDetail}
               onToggleTask={toggleTask}
+              onRescheduleTask={rescheduleTask}
               activeCalendarCount={activeCalendarCount}
               currentView={view}
               itemColors={preferences.itemColors ?? DEFAULT_ITEM_COLORS}

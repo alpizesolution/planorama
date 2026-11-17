@@ -6,6 +6,13 @@ import { DEFAULT_DASHBOARD_WIDGETS } from "../dashboard/types";
 export type Priority = "p1" | "p2" | "p3" | "p4" | "none";
 export type TaskStatus = "open" | "in_progress" | "completed";
 export type Recurrence = "none" | "daily" | "weekly" | "monthly" | "yearly";
+export type RecurrenceWeekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+export type RecurrenceConfig = {
+  interval?: number;
+  weekdays?: RecurrenceWeekday[];
+  endDate?: string | null;
+  maxOccurrences?: number | null;
+};
 export type TimingPreference = "scheduled" | "whenever";
 
 export interface TaskAttendee {
@@ -25,6 +32,11 @@ export type PlannerTask = {
   dueDate: string | null;
   dueTime: string | null;
   recurrence: Recurrence;
+  recurrenceConfig?: RecurrenceConfig;
+  seriesId?: string;
+  occurrenceDate?: string;
+  originalDueDate?: string | null;
+  isSkipped?: boolean;
   createdAt: string;
   updatedAt: string;
   isPinned?: boolean;

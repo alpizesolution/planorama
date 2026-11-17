@@ -67,6 +67,7 @@ export interface WeekViewProps {
   weeklyViewMode: "timeline" | "kanban";
   onSwitchWeeklyMode: (mode: "timeline" | "kanban") => void;
   onToggleTask?: (task: PlannerTask) => Promise<void>;
+  onRescheduleTask?: (task: PlannerTask, dueDate: string, dueTime: string | null) => Promise<void>;
   onMoveTaskStatus?: (taskId: string, status: PlannerTask["status"]) => Promise<void>;
   labels?: Array<{ id: string; name: string }>;
   saveError?: string;
@@ -99,6 +100,7 @@ export function WeekView({
   weeklyViewMode,
   onSwitchWeeklyMode,
   onToggleTask,
+  onRescheduleTask,
   onMoveTaskStatus,
   labels = [],
   saveError,
@@ -136,6 +138,31 @@ export function WeekView({
   });
 
   const [mobileDayMode, setMobileDayMode] = useState<"focus" | "overview">("focus");
+  const [calendarDragTaskId, setCalendarDragTaskId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+
+  const beginCalendarDrag = (event: React.DragEvent, task: PlannerTask) => {
+    if (!onRescheduleTask || !isTaskItem(task) || task.recurrence !== "none") return;
+    event.dataTransfer.setData("text/plain", task.id);
+    event.dataTransfer.effectAllowed = "move";
+    setCalendarDragTaskId(task.id);
+  };
+
+  const finishCalendarDrag = () => {
+    setCalendarDragTaskId(null);
+    setDropTarget(null);
+  };
+
+  const dropCalendarTask = (event: React.DragEvent, dateKey: string, dueTime: string | null) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const taskId = event.dataTransfer.getData("text/plain") || calendarDragTaskId;
+    const task = tasks.find((candidate) => candidate.id === taskId);
+    finishCalendarDrag();
+    if (!task || !onRescheduleTask || !isTaskItem(task) || task.recurrence !== "none") return;
+    if (task.dueDate === dateKey && task.dueTime === dueTime) return;
+    void onRescheduleTask(task, dateKey, dueTime);
+  };
 
   useEffect(() => {
     if (selectedDate) {
@@ -581,7 +608,10 @@ export function WeekView({
                   return (
                     <div
                       key={dateKey}
-                      className={`week-allday-col ${isToday ? "is-today-col" : ""} ${isMobileActive ? "is-mobile-active" : "is-mobile-hidden"}`}
+                      className={`week-allday-col ${isToday ? "is-today-col" : ""} ${isMobileActive ? "is-mobile-active" : "is-mobile-hidden"} ${dropTarget === `all-day-${dateKey}` ? "calendar-drop-target" : ""}`}
+                      onDragOver={(e) => { if (calendarDragTaskId) { e.preventDefault(); setDropTarget(`all-day-${dateKey}`); } }}
+                      onDragLeave={() => setDropTarget(null)}
+                      onDrop={(e) => dropCalendarTask(e, dateKey, null)}
                       onClick={(e) => handleAllDaySlotClick(e, dateKey)}
                     >
                       {items.length === 0 ? (
@@ -612,6 +642,9 @@ export function WeekView({
                               <div
                                 key={item.id}
                                 className={`week-allday-pill ${tileStyle.className} ${item.status === "completed" ? "is-completed" : ""}`}
+                                draggable={Boolean(onRescheduleTask && isTaskItem(item) && item.recurrence === "none")}
+                                onDragStart={(e) => beginCalendarDrag(e, item)}
+                                onDragEnd={finishCalendarDrag}
                                 style={{
                                   ...tileStyle.style,
                                 }}
@@ -729,7 +762,17 @@ export function WeekView({
                   return (
                     <div
                       key={dateKey}
-                      className={`week-day-column ${isToday ? "is-today-column" : ""} ${isSelected ? "is-selected-column" : ""} ${isMobileActive ? "is-mobile-active" : "is-mobile-hidden"}`}
+                      className={`week-day-column ${isToday ? "is-today-column" : ""} ${isSelected ? "is-selected-column" : ""} ${isMobileActive ? "is-mobile-active" : "is-mobile-hidden"} ${dropTarget?.startsWith(`timeline-${dateKey}`) ? "calendar-drop-target" : ""}`}
+                      onDragOver={(e) => { if (calendarDragTaskId) { e.preventDefault(); setDropTarget(`timeline-${dateKey}`); } }}
+                      onDragLeave={() => setDropTarget(null)}
+                      onDrop={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const minutes = Math.max(startHour * 60, Math.min(endHour * 60 + 59, startHour * 60 + Math.round(((e.clientY - rect.top) / HOUR_HEIGHT) * 60)));
+                        const rounded = Math.round(minutes / 15) * 15;
+                        const hour = Math.floor(rounded / 60).toString().padStart(2, "0");
+                        const minute = (rounded % 60).toString().padStart(2, "0");
+                        dropCalendarTask(e, dateKey, `${hour}:${minute}`);
+                      }}
                       onClick={(e) => handleColumnClick(e, dateKey)}
                     >
                       {/* Red Current Time Line Indicator (only in today's column) */}
@@ -775,6 +818,9 @@ export function WeekView({
                             <div
                               key={task.id}
                               className={`week-timeline-event ${tileStyle.className} ${task.status === "completed" ? "is-completed" : ""} ${task.isPinned ? "is-pinned" : ""}`}
+                              draggable={Boolean(onRescheduleTask && isTaskItem(task) && task.recurrence === "none")}
+                              onDragStart={(e) => beginCalendarDrag(e, task)}
+                              onDragEnd={finishCalendarDrag}
                               style={{
                                 top: `${topPx}px`,
                                 height: `${heightPx}px`,

@@ -16,6 +16,7 @@ export function validateTask(value: unknown): PlannerTask {
   if (task.dueDate === undefined) task.dueDate = null;
   if (task.dueTime === undefined) task.dueTime = null;
   if (task.recurrence === undefined) task.recurrence = "none";
+  if (task.recurrenceConfig !== undefined && (typeof task.recurrenceConfig !== "object" || task.recurrenceConfig === null)) throw new Error("Recurrence configuration is invalid.");
   if (task.priority === undefined) task.priority = "none";
   if (task.isPinned === undefined) task.isPinned = false;
   if (task.isPersonal === undefined) task.isPersonal = false;
@@ -56,6 +57,11 @@ export function validateNewTask(value: NewPlannerTask): Omit<PlannerTask, "id" |
     dueDate: value.dueDate ?? null,
     dueTime: value.dueTime ?? null,
     recurrence: value.recurrence ?? "none",
+    recurrenceConfig: value.recurrenceConfig,
+    seriesId: value.seriesId,
+    occurrenceDate: value.occurrenceDate,
+    originalDueDate: value.originalDueDate,
+    isSkipped: value.isSkipped,
     isPinned,
     isPersonal,
     timingPreference,

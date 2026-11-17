@@ -13,7 +13,7 @@ import {
   Info,
 } from "lucide-react";
 import { X, Plus, Check } from "@phosphor-icons/react";
-import type { PlannerTask, PlannerPreferences, Recurrence } from "@/lib/schedule/types";
+import type { PlannerTask, PlannerPreferences, Recurrence, RecurrenceConfig, RecurrenceWeekday } from "@/lib/schedule/types";
 import type { GoogleCalendarConfig } from "@/lib/google-calendar/types";
 import { DEFAULT_ITEM_COLORS } from "@/lib/calendar/item-color";
 import type { TaskLabel } from "@/app/page";
@@ -57,6 +57,7 @@ export interface SaveTaskData {
   location?: string;
   googleCalendarId?: string;
   recurrence: Recurrence;
+  recurrenceConfig?: RecurrenceConfig;
 }
 
 export interface SaveAppointmentData {
@@ -139,6 +140,10 @@ export function UnifiedCreateModal({
   const [taskEmoji, setTaskEmoji] = useState("");
   const [taskCalendarId, setTaskCalendarId] = useState("none");
   const [taskRecurrence, setTaskRecurrence] = useState<Recurrence>("none");
+  const [taskRecurrenceInterval, setTaskRecurrenceInterval] = useState(1);
+  const [taskRecurrenceWeekdays, setTaskRecurrenceWeekdays] = useState<RecurrenceWeekday[]>([]);
+  const [taskRecurrenceEndDate, setTaskRecurrenceEndDate] = useState("");
+  const [taskRecurrenceMaxOccurrences, setTaskRecurrenceMaxOccurrences] = useState(0);
   const [isAddingLabel, setIsAddingLabel] = useState(false);
   const [newLabelInput, setNewLabelInput] = useState("");
 
@@ -210,6 +215,10 @@ export function UnifiedCreateModal({
       setTaskEmoji("");
       setTaskCalendarId("none");
       setTaskRecurrence("none");
+      setTaskRecurrenceInterval(1);
+      setTaskRecurrenceWeekdays([]);
+      setTaskRecurrenceEndDate("");
+      setTaskRecurrenceMaxOccurrences(0);
       setIsAddingLabel(false);
       setNewLabelInput("");
 
@@ -398,6 +407,12 @@ export function UnifiedCreateModal({
           notes: taskNotes.trim(),
           googleCalendarId: taskCalendarId !== "none" ? taskCalendarId : undefined,
           recurrence: taskRecurrence,
+          recurrenceConfig: taskRecurrence === "none" ? undefined : {
+            interval: Math.max(1, taskRecurrenceInterval),
+            weekdays: taskRecurrenceWeekdays.length ? taskRecurrenceWeekdays : undefined,
+            endDate: taskRecurrenceEndDate || null,
+            maxOccurrences: taskRecurrenceMaxOccurrences > 0 ? taskRecurrenceMaxOccurrences : null,
+          },
         });
 
         if (success) onClose();
@@ -867,6 +882,28 @@ export function UnifiedCreateModal({
                   <span>
                     A due date is a deadline. A task without a scheduled time remains a checklist to-do; adding a time places it on your daily timeline.
                   </span>
+                </div>
+                <div className="recurrence-config-block">
+                  <label className="field-block">
+                    <span className="field-title">Repeat</span>
+                    <select className="native-select" value={taskRecurrence} onChange={(e) => { const value = e.target.value as Recurrence; setTaskRecurrence(value); if (value === "daily") setTaskRecurrenceWeekdays([]); }}>
+                      <option value="none">Does not repeat</option>
+                      <option value="daily">Every day</option>
+                      <option value="weekly">Every week</option>
+                      <option value="monthly">Every month</option>
+                      <option value="yearly">Every year</option>
+                    </select>
+                  </label>
+                  {taskRecurrence !== "none" && (
+                    <>
+                      <label className="field-block"><span className="field-title">Interval</span><input className="native-input" type="number" min={1} max={365} value={taskRecurrenceInterval} onChange={(e) => setTaskRecurrenceInterval(Number(e.target.value) || 1)} /></label>
+                      {(taskRecurrence === "daily" || taskRecurrence === "weekly") && (
+                        <div className="field-block recurrence-weekdays"><span className="field-title">Weekdays (optional)</span><div className="recurrence-weekday-buttons">{[1, 2, 3, 4, 5, 6, 0].map((day) => <button key={day} type="button" className={taskRecurrenceWeekdays.includes(day as RecurrenceWeekday) ? "selected" : ""} onClick={() => setTaskRecurrenceWeekdays((current) => current.includes(day as RecurrenceWeekday) ? current.filter((value) => value !== day) : [...current, day as RecurrenceWeekday])}>{["S", "M", "T", "W", "T", "F", "S"][day]}</button>)}</div></div>
+                      )}
+                      <label className="field-block"><span className="field-title">End date (optional)</span><input className="native-input" type="date" min={taskDueDate || undefined} value={taskRecurrenceEndDate} onChange={(e) => setTaskRecurrenceEndDate(e.target.value)} /></label>
+                      <label className="field-block"><span className="field-title">Max occurrences (optional)</span><input className="native-input" type="number" min={0} max={999} value={taskRecurrenceMaxOccurrences || ""} placeholder="Never ends" onChange={(e) => setTaskRecurrenceMaxOccurrences(Number(e.target.value) || 0)} /></label>
+                    </>
+                  )}
                 </div>
               </div>
 
