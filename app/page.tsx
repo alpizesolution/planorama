@@ -1769,6 +1769,35 @@ export default function HomePage() {
     }
   }
 
+  async function rescheduleTask(task: PlannerTask, dueDate: string, dueTime: string | null) {
+    if (isLocalHolidayTask(task) || task.recurrence !== "none") {
+      showToast(task.recurrence !== "none" ? "Recurring tasks cannot be moved as individual occurrences yet." : "This item cannot be moved.");
+      return;
+    }
+    const previous = task;
+    const updated: PlannerTask = { ...task, dueDate, dueTime, syncStatus: task.googleEventId && !task.isReadOnlyCalendar ? "pending" : task.syncStatus };
+    setTasks((current) => current.map((item) => item.id === task.id ? updated : item));
+    try {
+      const saved = await updateTask(updated);
+      setTasks((current) => current.map((item) => item.id === task.id ? saved : item));
+      if (saved.googleEventId && !saved.isReadOnlyCalendar) {
+        enqueueSyncAction({
+          action: "update",
+          taskId: saved.id,
+          googleEventId: saved.googleEventId,
+          googleCalendarId: saved.googleCalendarId,
+          googleAccountId: saved.googleAccountId,
+          localUpdatedAt: new Date().toISOString(),
+        });
+        void handleSyncGoogle();
+      }
+      showToast("Task rescheduled.");
+    } catch {
+      setTasks((current) => current.map((item) => item.id === task.id ? previous : item));
+      setSaveError("Your task could not be rescheduled.");
+    }
+  }
+
   async function deleteTask(task: PlannerTask) {
     if (isLocalHolidayTask(task)) return; // generated, read-only
     if (task.isReadOnlyCalendar) {
@@ -2428,6 +2457,7 @@ export default function HomePage() {
       weeklyViewMode={weeklyViewMode}
       onSwitchWeeklyMode={(m) => setWeeklyViewMode(m)}
       onToggleTask={toggleTask}
+      onRescheduleTask={rescheduleTask}
       onMoveTaskStatus={moveTaskToStatus}
       labels={labels}
       saveError={saveError}
@@ -2784,6 +2814,7 @@ export default function HomePage() {
               }
               onOpenTaskDetail={openTaskDetail}
               onToggleTask={toggleTask}
+              onRescheduleTask={rescheduleTask}
               activeCalendarCount={activeCalendarCount}
               currentView={view}
               itemColors={preferences.itemColors ?? DEFAULT_ITEM_COLORS}
