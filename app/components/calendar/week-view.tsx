@@ -222,9 +222,10 @@ export function WeekView({
     return () => clearInterval(interval);
   }, []);
 
-  // Compute dynamic startHour and endHour (6:00 AM to 10:00 PM by default, auto-expanded if an event falls outside)
+  // Keep the weekly timeline anchored at midnight so the first hourly row is
+  // always present below the dedicated All Day lane.
   const { startHour, endHour, hoursList } = useMemo(() => {
-    let minHour = DEFAULT_START_HOUR;
+    let minHour = 0;
     let maxHour = DEFAULT_END_HOUR;
 
     for (const day of weekDays) {
@@ -274,9 +275,17 @@ export function WeekView({
 
   // Auto-scroll timeline to a useful time range on mount or week change
   const timelineScrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const hasMountedTimelineRef = useRef(false);
 
   useEffect(() => {
     if (!timelineScrollContainerRef.current) return;
+
+    if (!hasMountedTimelineRef.current) {
+      hasMountedTimelineRef.current = true;
+      timelineScrollContainerRef.current.scrollTop = 0;
+      return;
+    }
+
     let targetMinutes = 8 * 60; // 8:00 AM default
 
     if (hasTodayInWeek) {
@@ -721,7 +730,11 @@ export function WeekView({
                   const period = hour >= 12 ? "PM" : "AM";
                   const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
                   return (
-                    <div key={hour} className="time-axis-cell" style={{ height: `${HOUR_HEIGHT}px` }}>
+                    <div
+                      key={hour}
+                      className={`time-axis-cell${hour === 0 ? " time-axis-cell-midnight" : ""}`}
+                      style={{ height: `${HOUR_HEIGHT}px` }}
+                    >
                       <span className="time-axis-label">
                         {displayHour} {period}
                       </span>
