@@ -534,7 +534,7 @@ describe("PLANORAMA Weekly Workspace & Google Calendar Integration", () => {
     });
 
     it("ensures top navigation in page.tsx remains the sole place to switch views across all views", () => {
-      const pagePath = path.resolve(__dirname, "../../app/page.tsx");
+      const pagePath = path.resolve(__dirname, "../../app/app/page.tsx");
       const content = fs.readFileSync(pagePath, "utf-8");
 
       // Month, Year, Agenda, Day, Week, Work Weeks, Board, Yearline are switched via setView from top nav

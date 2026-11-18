@@ -16,7 +16,7 @@ import { X, Plus, Check } from "@phosphor-icons/react";
 import type { PlannerTask, PlannerPreferences, Recurrence, RecurrenceConfig, RecurrenceWeekday } from "@/lib/schedule/types";
 import type { GoogleCalendarConfig } from "@/lib/google-calendar/types";
 import { DEFAULT_ITEM_COLORS } from "@/lib/calendar/item-color";
-import type { TaskLabel } from "@/app/page";
+import type { TaskLabel } from "@/app/app/page";
 import {
   DEFAULT_WEEKLY_AVAILABILITY,
   type DayAvailability,

@@ -56,7 +56,7 @@ import {
   getWidgetColumnSpan,
   resolveDashboardWidgets,
 } from "@/lib/dashboard/types";
-import type { TaskLabel } from "@/app/page";
+import type { TaskLabel } from "@/app/app/page";
 
 export type SettingsSectionId =
   | "general"

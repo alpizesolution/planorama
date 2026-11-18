@@ -25,13 +25,13 @@ export async function GET(request: Request) {
   // 1. Handle user decline or Google error
   if (error) {
     console.warn("[Auth/GoogleCallback] Google returned error:", error);
-    const redirectUrl = new URL("/", baseUrl);
+    const redirectUrl = new URL("/app", baseUrl);
     redirectUrl.searchParams.set("gcal_error", error);
     return NextResponse.redirect(redirectUrl.toString());
   }
 
   if (!code || !state) {
-    const redirectUrl = new URL("/", baseUrl);
+    const redirectUrl = new URL("/app", baseUrl);
     redirectUrl.searchParams.set("gcal_error", "missing_code_or_state");
     return NextResponse.redirect(redirectUrl.toString());
   }
@@ -41,7 +41,7 @@ export async function GET(request: Request) {
     // 2. Verify authenticated session
     const session = await getVerifiedSession();
     if (!session) {
-      const redirectUrl = new URL("/", baseUrl);
+      const redirectUrl = new URL("/app", baseUrl);
       redirectUrl.searchParams.set("gcal_error", "session_not_found");
       return NextResponse.redirect(redirectUrl.toString());
     }
@@ -100,7 +100,7 @@ export async function GET(request: Request) {
     const message = err instanceof Error ? err.message : "Token exchange failed.";
     const code = classifyOAuthCallbackError(err, stage, isFirestoreConfigured());
     console.error(`[Auth/GoogleCallback] ${stage} failed (${code}):`, message, err);
-    const redirectUrl = new URL("/", baseUrl);
+    const redirectUrl = new URL("/app", baseUrl);
     redirectUrl.searchParams.set("gcal_error", code);
     return NextResponse.redirect(redirectUrl.toString());
   }
@@ -113,8 +113,8 @@ export async function GET(request: Request) {
  */
 function buildRedirectUrl(returnUrl: string | undefined, baseUrl: string): URL {
   try {
-    return new URL(returnUrl || "/", baseUrl);
+    return new URL(returnUrl || "/app", baseUrl);
   } catch {
-    return new URL("/", baseUrl);
+    return new URL("/app", baseUrl);
   }
 }

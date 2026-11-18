@@ -2,7 +2,7 @@
   "name": "Planorama",
   "short_name": "Planorama",
   "description": "Your whole year, in view.",
-  "start_url": "/",
+  "start_url": "/app",
   "display": "standalone",
   "background_color": "#fff4e2",
   "theme_color": "#fff4e2"
