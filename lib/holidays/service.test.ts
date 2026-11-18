@@ -367,7 +367,7 @@ describe("Holidays page data", () => {
 
   it("the page feeds every calendar view from the merged holiday list", () => {
     const root = path.resolve(__dirname, "../..");
-    const page = fs.readFileSync(path.join(root, "app/page.tsx"), "utf-8");
+    const page = fs.readFileSync(path.join(root, "app/app/page.tsx"), "utf-8");
     expect(page).toMatch(/mergeLocalHolidays\(/);
     expect((page.match(/tasks=\{calendarItems\}/g) ?? []).length).toBeGreaterThanOrEqual(6);
   });
@@ -409,7 +409,7 @@ describe("Year and Yearline views", () => {
   });
 
   it("the Yearline renders from the merged list (holidays included) but counts only real tasks", () => {
-    const page = fs.readFileSync(path.join(root, "app/page.tsx"), "utf-8");
+    const page = fs.readFileSync(path.join(root, "app/app/page.tsx"), "utf-8");
     expect(page).toMatch(/for \(const t of calendarItems\)/);
     expect(page).toMatch(/yearline-holiday-item/);
     expect(page).toMatch(/const dayTasks = dayItems\.filter\(\(t\) => !t\.isHoliday\)/);

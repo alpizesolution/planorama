@@ -84,7 +84,7 @@ describe("PLANORAMA — Calendar Workspace Headers Across All Mobile Views", () 
   });
 
   it("6. Yearline in page.tsx integrates CalendarWorkspaceHeader with horizontal scroll controls", () => {
-    const pagePath = path.resolve(__dirname, "../../app/page.tsx");
+    const pagePath = path.resolve(__dirname, "../../app/app/page.tsx");
     const content = fs.readFileSync(pagePath, "utf-8");
 
     expect(content).toContain("import { CalendarWorkspaceHeader }");

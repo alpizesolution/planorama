@@ -229,7 +229,7 @@ describe("Daily Workspace UI wiring", () => {
     path.resolve(__dirname, "../../app/components/calendar/daily-progress-panel.tsx"),
     "utf-8"
   );
-  const page = fs.readFileSync(path.resolve(__dirname, "../../app/page.tsx"), "utf-8");
+  const page = fs.readFileSync(path.resolve(__dirname, "../../app/app/page.tsx"), "utf-8");
 
   it("renders the progress panel from computed data for the selected date", () => {
     expect(dayView).toContain("<DailyProgressPanel");
