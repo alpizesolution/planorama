@@ -1081,9 +1081,9 @@ export function UnifiedCreateModal({
               <div className="appt-info-banner">
                 <Sparkles size={16} className="banner-icon" />
                 <div className="banner-text">
-                  <strong>Reusable Availability Schedule</strong>
+                  <strong>Internal Availability Schedule</strong>
                   <p>
-                    Set up your working booking slots. Note: Public client self-booking links require public domain URL hosting. Your schedule will be used to enforce availability and prevent double bookings in Planorama.
+                    This blocks out your available hours and prevents double bookings inside Planorama. There&apos;s no public, shareable booking link yet — clients can&apos;t self-book these slots from outside the app.
                   </p>
                 </div>
               </div>

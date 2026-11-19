@@ -115,7 +115,7 @@ import {
 
 type TaskTemplate = { id: string; name: string; title: string; notes: string; priority: PlannerTask["priority"]; recurrence: PlannerTask["recurrence"] };
 export type TaskLabel = { id: string; name: string };
-type TaskProject = { id: string; name: string };
+export type TaskProject = { id: string; name: string };
 export type { AppView };
 
 const MONTH_NAMES = [
@@ -1330,6 +1330,18 @@ export default function HomePage() {
       if (projectFilter === projectId) setProjectFilter("");
       setSaveError("");
     } catch { setSaveError("Could not remove this project from every task. Please try again."); }
+  }
+
+  function renameProject(projectId: string, name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    if (projects.some((project) => project.id !== projectId && project.name.toLocaleLowerCase() === trimmed.toLocaleLowerCase())) {
+      setSaveError("A project with that name already exists.");
+      return;
+    }
+    const next = projects.map((project) => (project.id === projectId ? { ...project, name: trimmed.slice(0, 60) } : project));
+    try { window.localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(next)); setProjects(next); setSaveError(""); }
+    catch { setSaveError("Could not save this project on your device."); }
   }
 
   async function addTask() {
@@ -2610,6 +2622,10 @@ export default function HomePage() {
             labels={labels}
             onAddLabel={addLabel}
             onDeleteLabel={deleteLabel}
+            projects={projects}
+            onAddProject={addProject}
+            onDeleteProject={deleteProject}
+            onRenameProject={renameProject}
             onRestoreDefaults={handleRestoreDefaultPreferences}
             onSyncGoogle={handleSyncGoogle}
             isSyncingGoogle={isSyncingGoogle}
