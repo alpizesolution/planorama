@@ -534,7 +534,7 @@ export function CalendarSidebar({
                   </span>
                   <div className="item-details">
                     <strong className="item-title">Appointment schedule</strong>
-                    <small className="item-desc">Set up bookable availability and meeting slots.</small>
+                    <small className="item-desc">Block out availability &amp; meeting slots (internal only — no public booking link).</small>
                   </div>
                 </div>
                 <ChevronRight size={15} strokeWidth={2.2} className="item-chevron" aria-hidden="true" />

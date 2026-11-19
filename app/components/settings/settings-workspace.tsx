@@ -56,7 +56,7 @@ import {
   getWidgetColumnSpan,
   resolveDashboardWidgets,
 } from "@/lib/dashboard/types";
-import type { TaskLabel } from "@/app/app/page";
+import type { TaskLabel, TaskProject } from "@/app/app/page";
 
 export type SettingsSectionId =
   | "general"
@@ -84,6 +84,10 @@ export interface SettingsWorkspaceProps {
   labels: TaskLabel[];
   onAddLabel: () => void;
   onDeleteLabel: (id: string) => void;
+  projects: TaskProject[];
+  onAddProject: () => void;
+  onDeleteProject: (id: string) => void;
+  onRenameProject: (id: string, name: string) => void;
   onRestoreDefaults: () => void;
   onSyncGoogle: () => Promise<void>;
   isSyncingGoogle: boolean;
@@ -153,6 +157,10 @@ export function SettingsWorkspace({
   labels,
   onAddLabel,
   onDeleteLabel,
+  projects,
+  onAddProject,
+  onDeleteProject,
+  onRenameProject,
   onRestoreDefaults,
   onSyncGoogle,
   isSyncingGoogle,
@@ -165,6 +173,8 @@ export function SettingsWorkspace({
 }: SettingsWorkspaceProps) {
   const [showCustomThemeColors, setShowCustomThemeColors] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [projectNameDraft, setProjectNameDraft] = useState("");
 
   const disabled = preferences.disabledOptions ?? [];
   const customLabels = preferences.customLabels ?? {};
@@ -643,6 +653,86 @@ export function SettingsWorkspace({
                     ) : (
                       <p style={{ fontSize: "12px", color: "#78716c", margin: 0 }}>
                         No custom labels created yet. Click &quot;Add label&quot; to create your first tag.
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Sub-Card: Projects */}
+                <div className="settings-card">
+                  <div className="settings-card-header">
+                    <h3 className="settings-card-title">Projects</h3>
+                    <p className="settings-card-sub">
+                      Group related tasks together and filter your views by project.
+                    </p>
+                  </div>
+                  <div className="label-manager-subgroup">
+                    <div className="label-manager-heading">
+                      <div>
+                        <strong>Your Projects</strong>
+                        <p style={{ margin: "2px 0 0", fontSize: "12px", color: "#78716c" }}>
+                          Create, rename, or delete the projects you assign to tasks.
+                        </p>
+                      </div>
+                      <button type="button" className="task-action" onClick={onAddProject}>
+                        <Plus size={14} weight="bold" />
+                        <span>Add project</span>
+                      </button>
+                    </div>
+                    {projects.length > 0 ? (
+                      <div className="label-chip-list">
+                        {projects.map((project) =>
+                          editingProjectId === project.id ? (
+                            <span className="label-management-chip" key={project.id}>
+                              <input
+                                type="text"
+                                autoFocus
+                                value={projectNameDraft}
+                                maxLength={60}
+                                aria-label={`Rename ${project.name} project`}
+                                onChange={(e) => setProjectNameDraft(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    onRenameProject(project.id, projectNameDraft);
+                                    setEditingProjectId(null);
+                                  } else if (e.key === "Escape") {
+                                    setEditingProjectId(null);
+                                  }
+                                }}
+                                onBlur={() => {
+                                  onRenameProject(project.id, projectNameDraft);
+                                  setEditingProjectId(null);
+                                }}
+                                style={{ border: "none", background: "transparent", font: "inherit", width: "10ch" }}
+                              />
+                            </span>
+                          ) : (
+                            <span className="label-management-chip" key={project.id}>
+                              <button
+                                type="button"
+                                aria-label={`Rename ${project.name} project`}
+                                onClick={() => {
+                                  setEditingProjectId(project.id);
+                                  setProjectNameDraft(project.name);
+                                }}
+                                style={{ border: "none", background: "transparent", font: "inherit", cursor: "pointer", padding: 0 }}
+                              >
+                                {project.name}
+                              </button>
+                              <button
+                                type="button"
+                                aria-label={`Delete ${project.name} project`}
+                                onClick={() => onDeleteProject(project.id)}
+                              >
+                                ×
+                              </button>
+                            </span>
+                          )
+                        )}
+                      </div>
+                    ) : (
+                      <p style={{ fontSize: "12px", color: "#78716c", margin: 0 }}>
+                        No projects created yet. Click &quot;Add project&quot; to create your first one.
                       </p>
                     )}
                   </div>
