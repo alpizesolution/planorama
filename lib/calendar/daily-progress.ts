@@ -2,7 +2,7 @@ import type { PlannerTask } from "@/lib/schedule/types";
 import type { Habit, HabitCheckIn } from "@/lib/habits/types";
 import { isHabitScheduledForDate, formatLocalDateKey } from "@/lib/habits/streak-utils";
 import { isTaskItem, isHolidayItem } from "./item-classifier";
-import { isAllDayItem, parseMinutesFromTime } from "./day-layout";
+import { isAllDayItem, isScheduledOnDate, parseMinutesFromTime } from "./day-layout";
 
 /**
  * Daily progress calculations for the Day View "Daily Workspace".
@@ -15,8 +15,12 @@ import { isAllDayItem, parseMinutesFromTime } from "./day-layout";
  *   left out of the totals (it shows up as "skipped"). An activity is completed when it
  *   is marked completed or once it has ended.
  * - Habits: active habits scheduled for the date that already existed on that date.
- *   Completed only when a check-in record for that habit and date says so. A scheduled
- *   habit with no check-in on a past date is skipped.
+ *   Completed only when a check-in record for that habit and date says so. Habits are
+ *   reported separately in `habits` and are NOT part of `overall` / `summary`, because
+ *   the Daily Workspace does not list them. Counting them made a day with no visible
+ *   items show "0/3" (the three starter habits seeded on first run).
+ * - Overall / summary are computed only from the items the Daily Workspace shows for
+ *   the date (`getDailyWorkspaceItems`), so the panel and the list always agree.
  * - An event and a task linked through the same Google event id are one item,
  *   counted once as a task. Duplicate recurring instances on the same date collapse.
  */
@@ -140,6 +144,14 @@ function preferItem(a: PlannerTask, b: PlannerTask): PlannerTask {
 }
 
 /**
+ * The items the Daily Workspace lists for `dateKey` (all-day row + timeline).
+ * This is the one eligibility rule shared by the list and Daily Progress.
+ */
+export function getDailyWorkspaceItems(tasks: PlannerTask[], dateKey: string): PlannerTask[] {
+  return tasks.filter((item) => isScheduledOnDate(item, dateKey));
+}
+
+/**
  * Items scheduled on `dateKey`, de-duplicated:
  * - same record id only once
  * - a task and an event sharing a Google event id count once (as the task)
@@ -150,8 +162,7 @@ export function getCountableDayItems(tasks: PlannerTask[], dateKey: string): Pla
   const byKey = new Map<string, PlannerTask>();
   const aliases = new Map<string, string>();
 
-  for (const item of tasks) {
-    if (item.dueDate !== dateKey) continue;
+  for (const item of getDailyWorkspaceItems(tasks, dateKey)) {
     if (isHolidayItem(item)) continue;
 
     const keys = [`id:${item.id}`];
@@ -232,16 +243,12 @@ export function computeDailyProgress(input: {
   const doneHabitIds = new Set(
     checkIns.filter((c) => c.date === dateKey && c.completed).map((c) => c.habitId)
   );
-  let habitDone = 0;
-  for (const habit of scheduledHabits) {
-    if (doneHabitIds.has(habit.id)) habitDone++;
-    else if (relation === "past") skipped++;
-    else remaining++;
-  }
+  const habitDone = scheduledHabits.filter((habit) => doneHabitIds.has(habit.id)).length;
   const habitTotal = scheduledHabits.length;
 
-  const completed = taskDone + actDone + habitDone;
-  const total = taskTotal + actTotal + habitTotal;
+  // Only Daily Workspace items count toward the overall figures (see header comment).
+  const completed = taskDone + actDone;
+  const total = taskTotal + actTotal;
 
   return {
     dateKey,

@@ -32,6 +32,15 @@ export function parseMinutesFromTime(timeStr?: string | null): number | null {
 }
 
 /**
+ * Single date rule shared by the Daily Workspace list, the timeline layout and
+ * Daily Progress: an item belongs to a calendar day only when its local
+ * `dueDate` key is exactly that day. Items without a date never match.
+ */
+export function isScheduledOnDate(task: Pick<PlannerTask, "dueDate">, dateKey: string): boolean {
+  return typeof task.dueDate === "string" && task.dueDate.length > 0 && task.dueDate === dateKey;
+}
+
+/**
  * Determines whether a PlannerTask is an all-day item or dated daily task
  * (no specific start hour/minute).
  */
@@ -83,7 +92,7 @@ export function formatTimeRange(startMin: number, endMin: number): string {
  */
 export function layoutDayEvents(tasks: PlannerTask[], dateKey: string): PositionedDayEvent[] {
   // 1. Filter timed tasks on this date
-  const dayTimedTasks = tasks.filter((t) => t.dueDate === dateKey && !isAllDayItem(t));
+  const dayTimedTasks = tasks.filter((t) => isScheduledOnDate(t, dateKey) && !isAllDayItem(t));
   if (dayTimedTasks.length === 0) return [];
 
   // 2. Parse start minutes and duration

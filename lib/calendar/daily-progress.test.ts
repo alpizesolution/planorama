@@ -135,7 +135,7 @@ describe("Daily progress calculations", () => {
     expect(p.tasks).toEqual({ completed: 1, total: 1, percent: 100 });
   });
 
-  it("uses real habit check-ins for the selected date only", () => {
+  it("uses real habit check-ins for the selected date only, but keeps habits out of the Daily Workspace totals", () => {
     const habits = [
       habit({ id: "h1" }),
       habit({ id: "h2" }),
@@ -145,11 +145,15 @@ describe("Daily progress calculations", () => {
     ];
     const checkIns = [checkIn("h1", DAY), checkIn("h2", DAY, false), checkIn("h2", "2026-11-03")];
     const p = computeDailyProgress({ tasks: [], habits, checkIns, dateKey: DAY, now: noon });
+    // The Habits tracker still reports its own completion...
     expect(p.habits).toEqual({ completed: 1, total: 2, percent: 50 });
-    expect(p.summary.remaining).toBe(1);
+    // ...but an empty Daily Workspace must never show phantom scheduled items because
+    // of habits the UI doesn't list there.
+    expect(p.overall).toEqual({ completed: 0, total: 0, percent: 0, remaining: 0 });
+    expect(p.summary).toEqual({ completed: 0, remaining: 0, overdue: 0, skipped: 0, canceled: 0 });
   });
 
-  it("recalculates for historical dates without carrying today's counts", () => {
+  it("recalculates for historical dates without carrying today's counts, and never counts habits in the summary", () => {
     const habits = [habit({ id: "h1" }), habit({ id: "h2" })];
     const checkIns = [checkIn("h1", DAY), checkIn("h2", DAY), checkIn("h1", "2026-11-03")];
     const tasks = [task({ id: "today", status: "completed" }), task({ id: "yday", dueDate: "2026-11-03" })];
@@ -163,7 +167,9 @@ describe("Daily progress calculations", () => {
     expect(yesterday.relation).toBe("past");
     expect(yesterday.tasks).toEqual({ completed: 0, total: 1, percent: 0 });
     expect(yesterday.habits).toEqual({ completed: 1, total: 2, percent: 50 });
-    expect(yesterday.summary).toEqual({ completed: 1, remaining: 0, overdue: 1, skipped: 1, canceled: 0 });
+    // Only the one overdue task (not shown in the Daily Workspace list) is in the summary;
+    // the habit's completion/skip never leaks into Daily Progress's overall numbers.
+    expect(yesterday.summary).toEqual({ completed: 0, remaining: 0, overdue: 1, skipped: 0, canceled: 0 });
   });
 
   it("excludes skipped, canceled, and deleted tasks from eligible progress", () => {
@@ -211,7 +217,9 @@ describe("Daily progress calculations", () => {
       now: noon,
     });
     expect(p.relation).toBe("future");
-    expect(p.summary).toEqual({ completed: 0, remaining: 3, overdue: 0, skipped: 0, canceled: 0 });
+    // Two Daily Workspace items only; the habit is reported separately via p.habits.
+    expect(p.summary).toEqual({ completed: 0, remaining: 2, overdue: 0, skipped: 0, canceled: 0 });
+    expect(p.habits).toEqual({ completed: 0, total: 1, percent: 0 });
   });
 
   it("derives timeline states for timed items", () => {
@@ -220,6 +228,121 @@ describe("Daily progress calculations", () => {
     expect(getDayItemState(event({ dueTime: "09:00" }), DAY, noon)).toBe("completed");
     expect(getDayItemState(event({ dueTime: "20:00" }), DAY, noon)).toBe("upcoming");
     expect(getDayItemState(event({ eventStatus: "cancelled" }), DAY, noon)).toBe("cancelled");
+  });
+});
+
+describe("Daily Progress regression: phantom scheduled items", () => {
+  it("1. shows 0/0 - 0% for an empty selected date with no tasks, events or habits", () => {
+    const p = computeDailyProgress({ tasks: [], dateKey: DAY, now: noon });
+    expect(p.overall).toEqual({ completed: 0, total: 0, percent: 0, remaining: 0 });
+    expect(p.summary).toEqual({ completed: 0, remaining: 0, overdue: 0, skipped: 0, canceled: 0 });
+  });
+
+  it("2. never counts a task assigned to yesterday against today", () => {
+    const p = computeDailyProgress({
+      tasks: [task({ id: "yesterday", dueDate: "2026-11-03" })],
+      dateKey: DAY,
+      now: noon,
+    });
+    expect(p.overall).toEqual({ completed: 0, total: 0, percent: 0, remaining: 0 });
+  });
+
+  it("3. never counts a task assigned to tomorrow against today", () => {
+    const p = computeDailyProgress({
+      tasks: [task({ id: "tomorrow", dueDate: "2026-11-05" })],
+      dateKey: DAY,
+      now: noon,
+    });
+    expect(p.overall).toEqual({ completed: 0, total: 0, percent: 0, remaining: 0 });
+  });
+
+  it("4. a deleted task (removed from the source array) leaves no trace in the count", () => {
+    // Deletion in Planorama removes the record from storage entirely, so the fix is
+    // simply that computeDailyProgress never invents items beyond what it is given.
+    const beforeDelete = computeDailyProgress({
+      tasks: [task({ id: "will-delete" })],
+      dateKey: DAY,
+      now: noon,
+    });
+    const afterDelete = computeDailyProgress({ tasks: [], dateKey: DAY, now: noon });
+    expect(beforeDelete.overall.total).toBe(1);
+    expect(afterDelete.overall).toEqual({ completed: 0, total: 0, percent: 0, remaining: 0 });
+  });
+
+  it("5. a skipped occurrence is reported as skipped, not as a remaining item", () => {
+    const p = computeDailyProgress({ tasks: [task({ id: "s1", isSkipped: true })], dateKey: DAY, now: noon });
+    expect(p.overall).toEqual({ completed: 0, total: 0, percent: 0, remaining: 0 });
+    expect(p.summary).toEqual({ completed: 0, remaining: 0, overdue: 0, skipped: 1, canceled: 0 });
+  });
+
+  it("6. a canceled occurrence is reported as canceled, not as a remaining item", () => {
+    const p = computeDailyProgress({ tasks: [task({ id: "c1", isCanceled: true })], dateKey: DAY, now: noon });
+    expect(p.overall).toEqual({ completed: 0, total: 0, percent: 0, remaining: 0 });
+    expect(p.summary).toEqual({ completed: 0, remaining: 0, overdue: 0, skipped: 0, canceled: 1 });
+  });
+
+  it("7. a completed recurring occurrence counts once as done", () => {
+    const p = computeDailyProgress({
+      tasks: [
+        task({ id: "r1", title: "Water plants", recurrence: "daily", status: "completed" }),
+        task({ id: "r1" }), // duplicate copy of the same occurrence
+      ],
+      dateKey: DAY,
+      now: noon,
+    });
+    expect(p.overall).toEqual({ completed: 1, total: 1, percent: 100, remaining: 0 });
+  });
+
+  it("8. a future recurring occurrence is upcoming, not overdue or completed", () => {
+    const future = "2026-11-06";
+    const p = computeDailyProgress({
+      tasks: [task({ id: "r2", title: "Water plants", recurrence: "daily", dueDate: future })],
+      dateKey: future,
+      now: noon,
+    });
+    expect(p.relation).toBe("future");
+    expect(p.summary).toEqual({ completed: 0, remaining: 1, overdue: 0, skipped: 0, canceled: 0 });
+  });
+
+  it("9. a Google Calendar event on the date counts as an activity, consistent with local events", () => {
+    const p = computeDailyProgress({
+      tasks: [{ ...base, id: "gcal-1", isGoogleEvent: true, source: "google", itemType: "event", dueTime: "08:00" }],
+      dateKey: DAY,
+      now: noon,
+    });
+    expect(p.activities.total).toBe(1);
+    expect(p.overall.total).toBe(1);
+  });
+
+  it("10. a dueDate exactly at the day boundary belongs to that day only (no timezone drift)", () => {
+    const midnightTask = task({ id: "midnight", dueTime: "00:00" });
+    expect(getDayItemState(midnightTask, DAY, new Date(2026, 10, 4, 0, 0, 1))).toBe("in_progress");
+    const p = computeDailyProgress({ tasks: [midnightTask], dateKey: DAY, now: new Date(2026, 10, 4, 0, 0, 1) });
+    expect(p.overall.total).toBe(1);
+    // The same record, viewed from the adjacent calendar day, is not counted there.
+    const adjacent = computeDailyProgress({ tasks: [midnightTask], dateKey: "2026-11-05", now: noon });
+    expect(adjacent.overall.total).toBe(0);
+  });
+
+  it("11. recomputing from the same stored tasks after a refresh yields identical counts", () => {
+    const tasks = [task({ id: "a", status: "completed" }), task({ id: "b" })];
+    const first = computeDailyProgress({ tasks, dateKey: DAY, now: noon });
+    const second = computeDailyProgress({ tasks: JSON.parse(JSON.stringify(tasks)), dateKey: DAY, now: noon });
+    expect(second).toEqual(first);
+  });
+
+  it("12. navigating between days with different task counts recomputes independently each time", () => {
+    const tasks = [
+      task({ id: "busy-1", dueDate: "2026-11-04" }),
+      task({ id: "busy-2", dueDate: "2026-11-04", status: "completed" }),
+      task({ id: "quiet", dueDate: "2026-11-05" }),
+    ];
+    const busyDay = computeDailyProgress({ tasks, dateKey: "2026-11-04", now: noon });
+    const quietDay = computeDailyProgress({ tasks, dateKey: "2026-11-05", now: noon });
+    const emptyDay = computeDailyProgress({ tasks, dateKey: "2026-11-06", now: noon });
+    expect(busyDay.overall.total).toBe(2);
+    expect(quietDay.overall.total).toBe(1);
+    expect(emptyDay.overall).toEqual({ completed: 0, total: 0, percent: 0, remaining: 0 });
   });
 });
 

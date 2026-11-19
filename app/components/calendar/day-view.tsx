@@ -19,7 +19,7 @@ import { CalendarWorkspaceHeader } from "./calendar-workspace-header";
 import type { PlannerTask } from "@/lib/schedule/types";
 import type { GoogleCalendarConfig } from "@/lib/google-calendar/types";
 import type { Habit, HabitCheckIn } from "@/lib/habits/types";
-import { computeDailyProgress, getDayItemState, type DayItemState } from "@/lib/calendar/daily-progress";
+import { computeDailyProgress, getDailyWorkspaceItems, getDayItemState, type DayItemState } from "@/lib/calendar/daily-progress";
 import { DailyProgressPanel } from "./daily-progress-panel";
 import { type ResolvedCalendarTheme } from "@/lib/calendar/calendar-themes";
 import { isTaskItem } from "@/lib/calendar/item-classifier";
@@ -143,10 +143,9 @@ export function DayView({
     [tasks, habits, habitCheckIns, currentDateKey, now]
   );
 
-  // Filter tasks belonging to current date
-  const dayTasks = useMemo(() => {
-    return tasks.filter((t) => t.dueDate === currentDateKey);
-  }, [tasks, currentDateKey]);
+  // Items listed for the current date. Daily Progress uses the same rule, so the
+  // panel can never count something this list does not show.
+  const dayTasks = useMemo(() => getDailyWorkspaceItems(tasks, currentDateKey), [tasks, currentDateKey]);
 
   // Separate all-day items from timed timeline items
   const allDayItems = useMemo(() => {
